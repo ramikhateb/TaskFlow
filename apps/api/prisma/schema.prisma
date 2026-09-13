@@ -1,0 +1,12 @@
+// Prisma schema — intentionally has no application models yet.
+// Models (User, Task, TaskAssignment, RefreshToken) are introduced starting
+// in M2, per docs/DATABASE.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
