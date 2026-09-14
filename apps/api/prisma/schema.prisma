@@ -1,6 +1,5 @@
-// Prisma schema — intentionally has no application models yet.
-// Models (User, Task, TaskAssignment, RefreshToken) are introduced starting
-// in M2, per docs/DATABASE.md.
+// User and RefreshToken introduced in M2, per docs/DATABASE.md §4.
+// Task and TaskAssignment are introduced starting in M3 — not added yet.
 
 generator client {
   provider = "prisma-client-js"
@@ -9,4 +8,31 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+
+  @@index([name])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  familyId  String
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([userId])
+  @@index([familyId])
 }
