@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useLogout, useMe } from "../../src/features/auth/useAuth";
+import { PRIORITY_COLORS, priorityLabel } from "../../src/features/tasks/PrioritySelector";
 import { useDeleteTask, useTasks, useUpdateTask } from "../../src/features/tasks/useTasks";
 
 // Product decision (2026-09-15): TODO/IN_PROGRESS/DONE are fully
@@ -38,10 +39,26 @@ function TaskRow({ task }: { task: TaskResponse }) {
   return (
     <View style={styles.row}>
       <TouchableOpacity style={styles.rowMain} onPress={() => router.push(`/tasks/${task.id}`)}>
-        <Text style={[styles.rowTitle, task.status === "DONE" && styles.rowTitleDone]}>
-          {task.title}
+        <View style={styles.rowTitleLine}>
+          <Text
+            style={[
+              styles.priorityBadge,
+              {
+                color: PRIORITY_COLORS[task.priority],
+                borderColor: PRIORITY_COLORS[task.priority],
+              },
+            ]}
+          >
+            {priorityLabel(task.priority)}
+          </Text>
+          <Text style={[styles.rowTitle, task.status === "DONE" && styles.rowTitleDone]}>
+            {task.title}
+          </Text>
+        </View>
+        <Text style={styles.rowStatus}>
+          {task.status.replace("_", " ")}
+          {task.category ? ` · ${task.category}` : ""}
         </Text>
-        <Text style={styles.rowStatus}>{task.status.replace("_", " ")}</Text>
       </TouchableOpacity>
 
       <View style={styles.rowActions}>
@@ -145,6 +162,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   rowMain: { flex: 1 },
+  rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  priorityBadge: {
+    fontSize: 10,
+    fontWeight: "700",
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
   rowTitle: { fontSize: 16, fontWeight: "600" },
   rowTitleDone: { textDecorationLine: "line-through", color: "#888" },
   rowStatus: { fontSize: 12, color: "#666", marginTop: 2 },

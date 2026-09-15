@@ -16,6 +16,10 @@ export function findManyByAssignee(assigneeId: string): Promise<Task[]> {
 export function create(data: {
   title: string;
   description: string | null;
+  priority: Task["priority"];
+  category: string | null;
+  scheduledAt: Date | null;
+  deadline: Date | null;
   creatorId: string;
   assigneeId: string;
 }): Promise<Task> {
@@ -28,6 +32,10 @@ export function update(
     title: string;
     description: string | null;
     status: Task["status"];
+    priority: Task["priority"];
+    category: string | null;
+    scheduledAt: Date | null;
+    deadline: Date | null;
     completedAt: Date | null;
   }>,
 ): Promise<Task> {

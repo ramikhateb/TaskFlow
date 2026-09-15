@@ -17,8 +17,8 @@ Deferred: password reset, email verification, OAuth/social login, multi-device s
 
 ### 1.2 Task Fields & Lifecycle
 
-- FR-7 A task has: `title` (required), `description` (optional), `priority` (`LOW`/`MEDIUM`/`HIGH`/`URGENT`, defaults to `MEDIUM`), `category` (optional free-text label), `scheduledAt` (optional date/time), `deadline` (optional date/time), and `status` (`TODO`/`IN_PROGRESS`/`DONE`/`CANCELLED`, defaults to `TODO`).
-- FR-8 `scheduledAt` (when the assignee plans to work on it) and `deadline` (when it must be done by) are independent fields; neither implies the other.
+- FR-7 A task has: `title` (required), `description` (optional), `priority` (`LOW`/`MEDIUM`/`HIGH`, defaults to `MEDIUM`), `category` (optional free-text label — trimmed, at most 100 characters, rejected if blank after trimming; `null`/omitted means no category), `scheduledAt` (optional date/time), `deadline` (optional date/time), and `status` (`TODO`/`IN_PROGRESS`/`DONE`/`CANCELLED`, defaults to `TODO`).
+- FR-8 `scheduledAt` (when the assignee plans to work on it) and `deadline` (when it must be done by) are independent fields; neither implies the other. A task may have either, both, or neither. When both are present, `deadline` must be on or after `scheduledAt` (see EC-13).
 - FR-9 An authenticated user can create a task for themselves (creator = assignee).
 - FR-10 The assignee of a task can update any of its fields.
 - FR-11 The assignee of a task can mark it complete (status → `DONE`) or delete it.
@@ -90,6 +90,7 @@ All checks are enforced server-side in the service layer (see [ARCHITECTURE.md](
 - **EC-10 Duplicate email registration.** Registration with an already-used email is rejected with a clear, non-account-enumerating message distinct from login's generic "invalid credentials" (login intentionally does not reveal whether the email exists).
 - **EC-11 Empty/whitespace title.** Rejected at the validation layer (Zod), never reaching the service/database.
 - **EC-12 Category free text.** Category has no fixed vocabulary in v1; filtering is by exact string match on whatever value the user has used before (see [DATABASE.md](./DATABASE.md) for the future dedicated-entity path).
+- **EC-13 Deadline before scheduledAt.** If both `scheduledAt` and `deadline` are set on a task, `deadline` must be greater than or equal to `scheduledAt`. This is checked against the task's resulting complete state — on create, and on a partial update, where only one of the two fields may be present in the request but the other's existing stored value still applies. A task may still have only `scheduledAt`, only `deadline`, or neither; violating the invariant is rejected as a conflict error, not silently corrected.
 
 ## 4. Non-Functional Requirements
 

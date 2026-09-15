@@ -1,5 +1,9 @@
 import { ConflictError, NotFoundError } from "../../src/errors";
-import { createTaskService, isValidStatusTransition } from "../../src/services/taskService";
+import {
+  createTaskService,
+  isScheduleValid,
+  isValidStatusTransition,
+} from "../../src/services/taskService";
 import { createFakeTaskRepository } from "../helpers/fakeTaskRepository";
 
 const USER_A = "user-a";
@@ -35,6 +39,37 @@ describe("isValidStatusTransition (product decision 2026-09-15)", () => {
   });
 });
 
+describe("isScheduleValid (EC-13)", () => {
+  it("is valid when scheduledAt is before deadline", () => {
+    expect(
+      isScheduleValid(new Date("2026-03-01T00:00:00Z"), new Date("2026-03-05T00:00:00Z")),
+    ).toBe(true);
+  });
+
+  it("is valid when scheduledAt equals deadline", () => {
+    const date = new Date("2026-03-01T00:00:00Z");
+    expect(isScheduleValid(date, new Date(date))).toBe(true);
+  });
+
+  it("is invalid when scheduledAt is after deadline", () => {
+    expect(
+      isScheduleValid(new Date("2026-03-05T00:00:00Z"), new Date("2026-03-01T00:00:00Z")),
+    ).toBe(false);
+  });
+
+  it("is valid when only scheduledAt is set", () => {
+    expect(isScheduleValid(new Date("2026-03-01T00:00:00Z"), null)).toBe(true);
+  });
+
+  it("is valid when only deadline is set", () => {
+    expect(isScheduleValid(null, new Date("2026-03-01T00:00:00Z"))).toBe(true);
+  });
+
+  it("is valid when neither is set", () => {
+    expect(isScheduleValid(null, null)).toBe(true);
+  });
+});
+
 describe("taskService.createTask", () => {
   it("sets creatorId and assigneeId to the authenticated user, ignoring any other input", async () => {
     const { service, tasks } = buildService();
@@ -51,6 +86,79 @@ describe("taskService.createTask", () => {
     const { service } = buildService();
     const result = await service.createTask(USER_A, { title: "No description" });
     expect(result.description).toBeNull();
+  });
+
+  it("defaults priority to MEDIUM when omitted", async () => {
+    const { service } = buildService();
+    const result = await service.createTask(USER_A, { title: "Task" });
+    expect(result.priority).toBe("MEDIUM");
+  });
+
+  it.each(["LOW", "MEDIUM", "HIGH"] as const)("accepts priority %s", async (priority) => {
+    const { service } = buildService();
+    const result = await service.createTask(USER_A, { title: "Task", priority });
+    expect(result.priority).toBe(priority);
+  });
+
+  it("stores an omitted category/scheduledAt/deadline as null", async () => {
+    const { service } = buildService();
+    const result = await service.createTask(USER_A, { title: "Task" });
+    expect(result.category).toBeNull();
+    expect(result.scheduledAt).toBeNull();
+    expect(result.deadline).toBeNull();
+  });
+
+  it("persists category, scheduledAt, and deadline when provided", async () => {
+    const { service } = buildService();
+    const result = await service.createTask(USER_A, {
+      title: "Plan launch",
+      category: "Work",
+      scheduledAt: "2026-03-01T09:00:00.000Z",
+      deadline: "2026-03-05T17:00:00.000Z",
+    });
+
+    expect(result.category).toBe("Work");
+    expect(result.scheduledAt).toBe("2026-03-01T09:00:00.000Z");
+    expect(result.deadline).toBe("2026-03-05T17:00:00.000Z");
+  });
+
+  it("keeps scheduledAt and deadline independent of one another", async () => {
+    const { service } = buildService();
+    const scheduledOnly = await service.createTask(USER_A, {
+      title: "Scheduled only",
+      scheduledAt: "2026-03-01T09:00:00.000Z",
+    });
+    const deadlineOnly = await service.createTask(USER_A, {
+      title: "Deadline only",
+      deadline: "2026-03-05T17:00:00.000Z",
+    });
+
+    expect(scheduledOnly.deadline).toBeNull();
+    expect(deadlineOnly.scheduledAt).toBeNull();
+  });
+
+  it("accepts scheduledAt equal to deadline", async () => {
+    const { service } = buildService();
+    const result = await service.createTask(USER_A, {
+      title: "Same instant",
+      scheduledAt: "2026-03-01T09:00:00.000Z",
+      deadline: "2026-03-01T09:00:00.000Z",
+    });
+
+    expect(result.scheduledAt).toBe("2026-03-01T09:00:00.000Z");
+    expect(result.deadline).toBe("2026-03-01T09:00:00.000Z");
+  });
+
+  it("rejects scheduledAt after deadline with ConflictError", async () => {
+    const { service } = buildService();
+
+    await expect(
+      service.createTask(USER_A, {
+        title: "Backwards",
+        scheduledAt: "2026-03-05T00:00:00.000Z",
+        deadline: "2026-03-01T00:00:00.000Z",
+      }),
+    ).rejects.toBeInstanceOf(ConflictError);
   });
 });
 
@@ -169,6 +277,104 @@ describe("taskService.updateTask", () => {
     await expect(
       service.updateTask(USER_B, created.id, { title: "Hijacked" }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("updates priority", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+
+    const result = await service.updateTask(USER_A, created.id, { priority: "HIGH" });
+
+    expect(result.priority).toBe("HIGH");
+  });
+
+  it("updates category, scheduledAt, and deadline independently", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+
+    const result = await service.updateTask(USER_A, created.id, {
+      category: "Personal",
+      scheduledAt: "2026-04-01T08:00:00.000Z",
+      deadline: "2026-04-10T23:59:00.000Z",
+    });
+
+    expect(result.category).toBe("Personal");
+    expect(result.scheduledAt).toBe("2026-04-01T08:00:00.000Z");
+    expect(result.deadline).toBe("2026-04-10T23:59:00.000Z");
+  });
+
+  it("clears category, scheduledAt, and deadline when explicitly set to null", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, {
+      title: "Task",
+      category: "Work",
+      scheduledAt: "2026-04-01T08:00:00.000Z",
+      deadline: "2026-04-10T23:59:00.000Z",
+    });
+
+    const result = await service.updateTask(USER_A, created.id, {
+      category: null,
+      scheduledAt: null,
+      deadline: null,
+    });
+
+    expect(result.category).toBeNull();
+    expect(result.scheduledAt).toBeNull();
+    expect(result.deadline).toBeNull();
+  });
+
+  it("leaves category/scheduledAt/deadline untouched when omitted from the update", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, {
+      title: "Task",
+      category: "Work",
+      scheduledAt: "2026-04-01T08:00:00.000Z",
+    });
+
+    const result = await service.updateTask(USER_A, created.id, { title: "Renamed" });
+
+    expect(result.title).toBe("Renamed");
+    expect(result.category).toBe("Work");
+    expect(result.scheduledAt).toBe("2026-04-01T08:00:00.000Z");
+  });
+
+  it("rejects a PATCH to scheduledAt that conflicts with the existing deadline (EC-13)", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, {
+      title: "Task",
+      deadline: "2026-04-01T00:00:00.000Z",
+    });
+
+    await expect(
+      service.updateTask(USER_A, created.id, { scheduledAt: "2026-04-05T00:00:00.000Z" }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("rejects a PATCH to deadline that conflicts with the existing scheduledAt (EC-13)", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, {
+      title: "Task",
+      scheduledAt: "2026-04-05T00:00:00.000Z",
+    });
+
+    await expect(
+      service.updateTask(USER_A, created.id, { deadline: "2026-04-01T00:00:00.000Z" }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("allows a PATCH that keeps the resulting state valid relative to the other stored field", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, {
+      title: "Task",
+      deadline: "2026-04-10T00:00:00.000Z",
+    });
+
+    const result = await service.updateTask(USER_A, created.id, {
+      scheduledAt: "2026-04-05T00:00:00.000Z",
+    });
+
+    expect(result.scheduledAt).toBe("2026-04-05T00:00:00.000Z");
+    expect(result.deadline).toBe("2026-04-10T00:00:00.000Z");
   });
 });
 

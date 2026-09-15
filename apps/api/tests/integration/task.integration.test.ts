@@ -78,6 +78,142 @@ describe("POST /tasks", () => {
   });
 });
 
+describe("POST /tasks — extended attributes (M4)", () => {
+  it("defaults priority to MEDIUM and leaves category/scheduledAt/deadline null when omitted", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.priority).toBe("MEDIUM");
+    expect(res.body.category).toBeNull();
+    expect(res.body.scheduledAt).toBeNull();
+    expect(res.body.deadline).toBeNull();
+  });
+
+  it.each(["LOW", "MEDIUM", "HIGH"])("accepts priority %s", async (priority) => {
+    const alice = await registerUser("alice@example.com", "Alice");
+
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task", priority });
+
+    expect(res.status).toBe(201);
+    expect(res.body.priority).toBe(priority);
+  });
+
+  it("rejects an invalid priority value with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task", priority: "URGENT" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("persists category, scheduledAt, and deadline as ISO 8601 UTC strings", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({
+        title: "Plan launch",
+        category: "Work",
+        scheduledAt: "2026-03-01T09:00:00.000Z",
+        deadline: "2026-03-05T17:00:00.000Z",
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.category).toBe("Work");
+    expect(res.body.scheduledAt).toBe("2026-03-01T09:00:00.000Z");
+    expect(res.body.deadline).toBe("2026-03-05T17:00:00.000Z");
+  });
+
+  it("trims category and rejects one over the max length with 400", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+
+    const trimmed = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task", category: "  Work  " });
+    expect(trimmed.body.category).toBe("Work");
+
+    const tooLong = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task", category: "x".repeat(101) });
+    expect(tooLong.status).toBe(400);
+    expect(tooLong.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it.each(["scheduledAt", "deadline"])(
+    "rejects a malformed %s with 400 VALIDATION_ERROR",
+    async (field) => {
+      const alice = await registerUser("alice@example.com", "Alice");
+
+      const res = await request(app)
+        .post("/tasks")
+        .set("Authorization", `Bearer ${alice.accessToken}`)
+        .send({ title: "Task", [field]: "not-a-date" });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    },
+  );
+
+  it("keeps scheduledAt and deadline independent", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task", scheduledAt: "2026-03-01T09:00:00.000Z" });
+
+    expect(res.body.scheduledAt).toBe("2026-03-01T09:00:00.000Z");
+    expect(res.body.deadline).toBeNull();
+  });
+
+  it("accepts scheduledAt equal to deadline (EC-13)", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({
+        title: "Task",
+        scheduledAt: "2026-03-01T09:00:00.000Z",
+        deadline: "2026-03-01T09:00:00.000Z",
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.scheduledAt).toBe(res.body.deadline);
+  });
+
+  it("rejects scheduledAt after deadline with 409 CONFLICT (EC-13)", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+
+    const res = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({
+        title: "Task",
+        scheduledAt: "2026-03-05T00:00:00.000Z",
+        deadline: "2026-03-01T00:00:00.000Z",
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("CONFLICT");
+  });
+});
+
 describe("GET /tasks", () => {
   it("returns only the caller's own tasks", async () => {
     const alice = await registerUser("alice@example.com", "Alice");
@@ -277,6 +413,153 @@ describe("PATCH /tasks/:id", () => {
   it("rejects an unauthenticated request with 401", async () => {
     const res = await request(app).patch("/tasks/some-id").send({ title: "x" });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("PATCH /tasks/:id — extended attributes (M4)", () => {
+  it("updates priority, category, scheduledAt, and deadline", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task" });
+
+    const res = await request(app)
+      .patch(`/tasks/${created.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({
+        priority: "HIGH",
+        category: "Personal",
+        scheduledAt: "2026-04-01T08:00:00.000Z",
+        deadline: "2026-04-10T23:59:00.000Z",
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.priority).toBe("HIGH");
+    expect(res.body.category).toBe("Personal");
+    expect(res.body.scheduledAt).toBe("2026-04-01T08:00:00.000Z");
+    expect(res.body.deadline).toBe("2026-04-10T23:59:00.000Z");
+  });
+
+  it("clears category, scheduledAt, and deadline when explicitly set to null", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({
+        title: "Task",
+        category: "Work",
+        scheduledAt: "2026-04-01T08:00:00.000Z",
+        deadline: "2026-04-10T23:59:00.000Z",
+      });
+
+    const res = await request(app)
+      .patch(`/tasks/${created.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ category: null, scheduledAt: null, deadline: null });
+
+    expect(res.status).toBe(200);
+    expect(res.body.category).toBeNull();
+    expect(res.body.scheduledAt).toBeNull();
+    expect(res.body.deadline).toBeNull();
+  });
+
+  it("leaves extended attributes untouched when omitted from the PATCH body", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task", category: "Work", priority: "HIGH" });
+
+    const res = await request(app)
+      .patch(`/tasks/${created.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Renamed" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.title).toBe("Renamed");
+    expect(res.body.category).toBe("Work");
+    expect(res.body.priority).toBe("HIGH");
+  });
+
+  it("rejects an invalid priority value with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task" });
+
+    const res = await request(app)
+      .patch(`/tasks/${created.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ priority: "URGENT" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects a malformed deadline with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task" });
+
+    const res = await request(app)
+      .patch(`/tasks/${created.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ deadline: "not-a-date" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects a PATCH to scheduledAt that conflicts with the existing deadline (EC-13)", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task", deadline: "2026-04-01T00:00:00.000Z" });
+
+    const res = await request(app)
+      .patch(`/tasks/${created.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ scheduledAt: "2026-04-05T00:00:00.000Z" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("CONFLICT");
+  });
+
+  it("rejects a PATCH to deadline that conflicts with the existing scheduledAt (EC-13)", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Task", scheduledAt: "2026-04-05T00:00:00.000Z" });
+
+    const res = await request(app)
+      .patch(`/tasks/${created.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ deadline: "2026-04-01T00:00:00.000Z" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("CONFLICT");
+  });
+
+  it("returns 404 when another user tries to change extended attributes", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const bob = await registerUser("bob@example.com", "Bob");
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Alice's task" });
+
+    const res = await request(app)
+      .patch(`/tasks/${created.body.id}`)
+      .set("Authorization", `Bearer ${bob.accessToken}`)
+      .send({ priority: "HIGH" });
+
+    expect(res.status).toBe(404);
   });
 });
 

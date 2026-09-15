@@ -1,6 +1,6 @@
 // User and RefreshToken introduced in M2, per docs/DATABASE.md §4.
 // Task introduced in M3 (self-owned only: creator == assignee always, no
-// TaskAssignment yet). priority/category/scheduledAt/deadline come in M4.
+// TaskAssignment yet). M4 adds priority/category/scheduledAt/deadline.
 
 generator client {
   provider = "prisma-client-js"
@@ -33,11 +33,26 @@ enum TaskStatus {
   CANCELLED
 }
 
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 model Task {
-  id          String     @id @default(cuid())
+  id          String       @id @default(cuid())
   title       String
   description String?
-  status      TaskStatus @default(TODO)
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  category    String?
+
+  // scheduledAt: when the assignee plans to work on it.
+  // deadline: when it must be done by. Independent — neither implies the
+  // other (FR-8) — but when both are set, deadline >= scheduledAt is
+  // enforced in the service layer, not here (EC-13; see taskService.ts).
+  scheduledAt DateTime?
+  deadline    DateTime?
 
   creatorId String
   creator   User   @relation("TaskCreator", fields: [creatorId], references: [id])
@@ -56,6 +71,9 @@ model Task {
   updatedAt DateTime @updatedAt
 
   @@index([assigneeId, status])
+  @@index([assigneeId, scheduledAt])
+  @@index([assigneeId, deadline])
+  @@index([assigneeId, category])
   @@index([creatorId])
 }
 

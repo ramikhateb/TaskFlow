@@ -1,4 +1,4 @@
-import type { Task, TaskStatus } from "@prisma/client";
+import type { Task, TaskPriority, TaskStatus } from "@prisma/client";
 import type { CreateTaskRequest, TaskResponse, UpdateTaskRequest } from "@taskflow/shared";
 import { ConflictError, NotFoundError } from "../errors";
 
@@ -10,6 +10,10 @@ export interface TaskRepository {
   create(data: {
     title: string;
     description: string | null;
+    priority: TaskPriority;
+    category: string | null;
+    scheduledAt: Date | null;
+    deadline: Date | null;
     creatorId: string;
     assigneeId: string;
   }): Promise<Task>;
@@ -19,6 +23,10 @@ export interface TaskRepository {
       title: string;
       description: string | null;
       status: TaskStatus;
+      priority: TaskPriority;
+      category: string | null;
+      scheduledAt: Date | null;
+      deadline: Date | null;
       completedAt: Date | null;
     }>,
   ): Promise<Task>;
@@ -45,12 +53,26 @@ export function isValidStatusTransition(from: TaskStatus, to: TaskStatus): boole
   return ALLOWED_TRANSITIONS[from].includes(to);
 }
 
+// FR-8/EC-13: scheduledAt and deadline are independent — either, both, or
+// neither may be set — but when both are present, deadline must be on or
+// after scheduledAt. Checked against the task's *resulting* complete state,
+// so a PATCH that touches only one of the two fields is validated against
+// whichever value (new or already-stored) the other field currently holds.
+export function isScheduleValid(scheduledAt: Date | null, deadline: Date | null): boolean {
+  if (scheduledAt === null || deadline === null) return true;
+  return deadline.getTime() >= scheduledAt.getTime();
+}
+
 function toTaskResponse(task: Task): TaskResponse {
   return {
     id: task.id,
     title: task.title,
     description: task.description,
     status: task.status,
+    priority: task.priority,
+    category: task.category,
+    scheduledAt: task.scheduledAt?.toISOString() ?? null,
+    deadline: task.deadline?.toISOString() ?? null,
     creatorId: task.creatorId,
     assigneeId: task.assigneeId,
     completedAt: task.completedAt?.toISOString() ?? null,
@@ -80,11 +102,22 @@ export function createTaskService({ taskRepository }: TaskServiceDeps) {
   }
 
   async function createTask(userId: string, input: CreateTaskRequest): Promise<TaskResponse> {
+    const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
+    const deadline = input.deadline ? new Date(input.deadline) : null;
+
+    if (!isScheduleValid(scheduledAt, deadline)) {
+      throw new ConflictError("deadline must be on or after scheduledAt");
+    }
+
     // creatorId/assigneeId always come from the verified access token, never
     // from the request body — CreateTaskRequest has no such fields at all.
     const task = await taskRepository.create({
       title: input.title,
       description: input.description ?? null,
+      priority: input.priority ?? "MEDIUM",
+      category: input.category ?? null,
+      scheduledAt,
+      deadline,
       creatorId: userId,
       assigneeId: userId,
     });
@@ -107,9 +140,33 @@ export function createTaskService({ taskRepository }: TaskServiceDeps) {
       throw new ConflictError(`Cannot transition task from ${task.status} to ${input.status}`);
     }
 
+    // Resulting state, not just the incoming partial payload: a PATCH that
+    // only touches one of scheduledAt/deadline must still be validated
+    // against whatever the other one currently is on the stored task.
+    const resultingScheduledAt =
+      input.scheduledAt !== undefined
+        ? input.scheduledAt === null
+          ? null
+          : new Date(input.scheduledAt)
+        : task.scheduledAt;
+    const resultingDeadline =
+      input.deadline !== undefined
+        ? input.deadline === null
+          ? null
+          : new Date(input.deadline)
+        : task.deadline;
+
+    if (!isScheduleValid(resultingScheduledAt, resultingDeadline)) {
+      throw new ConflictError("deadline must be on or after scheduledAt");
+    }
+
     const updated = await taskRepository.update(taskId, {
       ...(input.title !== undefined && { title: input.title }),
       ...(input.description !== undefined && { description: input.description }),
+      ...(input.priority !== undefined && { priority: input.priority }),
+      ...(input.category !== undefined && { category: input.category }),
+      ...(input.scheduledAt !== undefined && { scheduledAt: resultingScheduledAt }),
+      ...(input.deadline !== undefined && { deadline: resultingDeadline }),
       ...(input.status !== undefined && {
         status: input.status,
         completedAt: input.status === "DONE" ? new Date() : null,
