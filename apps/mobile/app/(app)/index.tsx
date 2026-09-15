@@ -1,50 +1,116 @@
+import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { useHealthCheck } from "../../src/api/health";
+import type { TaskResponse } from "@taskflow/shared";
+import {
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { useLogout, useMe } from "../../src/features/auth/useAuth";
+import { useDeleteTask, useTasks, useUpdateTask } from "../../src/features/tasks/useTasks";
 
-export default function HomeScreen() {
+// Product decision (2026-09-15): TODO/IN_PROGRESS/DONE are fully
+// interchangeable, so a task can be completed or reopened directly, in one
+// tap, regardless of its current status. CANCELLED remains terminal.
+function nextStepFor(
+  status: TaskResponse["status"],
+): { label: string; to: TaskResponse["status"] } | null {
+  switch (status) {
+    case "TODO":
+    case "IN_PROGRESS":
+      return { label: "Mark Done", to: "DONE" };
+    case "DONE":
+      return { label: "Mark Not Done", to: "TODO" };
+    case "CANCELLED":
+      return null;
+  }
+}
+
+function TaskRow({ task }: { task: TaskResponse }) {
+  const router = useRouter();
+  const updateTask = useUpdateTask(task.id);
+  const deleteTask = useDeleteTask();
+  const nextStep = nextStepFor(task.status);
+
+  return (
+    <View style={styles.row}>
+      <TouchableOpacity style={styles.rowMain} onPress={() => router.push(`/tasks/${task.id}`)}>
+        <Text style={[styles.rowTitle, task.status === "DONE" && styles.rowTitleDone]}>
+          {task.title}
+        </Text>
+        <Text style={styles.rowStatus}>{task.status.replace("_", " ")}</Text>
+      </TouchableOpacity>
+
+      <View style={styles.rowActions}>
+        {nextStep && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            disabled={updateTask.isPending}
+            onPress={() => updateTask.mutate({ status: nextStep.to })}
+          >
+            <Text style={styles.actionText}>{nextStep.label}</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          accessibilityRole="button"
+          disabled={deleteTask.isPending}
+          onPress={() => deleteTask.mutate(task.id)}
+        >
+          <Text style={styles.deleteText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+export default function TaskListScreen() {
+  const router = useRouter();
   const me = useMe();
-  const health = useHealthCheck();
   const logout = useLogout();
+  const tasks = useTasks();
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>TaskFlow</Text>
-
-      {me.isLoading && <ActivityIndicator />}
-      {me.data && (
-        <Text style={styles.profile}>
-          Signed in as {me.data.name} ({me.data.email})
-        </Text>
-      )}
-
-      <Text style={styles.label}>API connection</Text>
-      {health.isLoading && <Text testID="api-status">Checking API connection…</Text>}
-      {health.isError && (
-        <Text testID="api-status" style={styles.error}>
-          Could not reach API:{" "}
-          {health.error instanceof Error ? health.error.message : "unknown error"}
-        </Text>
-      )}
-      {health.data && (
-        <Text testID="api-status" style={styles.success}>
-          API status: {health.data.status} (shared package: {health.data.sharedPackage})
-        </Text>
-      )}
+      <View style={styles.header}>
+        <Text style={styles.title}>TaskFlow</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => logout.mutate()}>
+          <Text style={styles.signOut}>Sign Out</Text>
+        </TouchableOpacity>
+      </View>
+      {me.data && <Text style={styles.subtitle}>Signed in as {me.data.name}</Text>}
 
       <TouchableOpacity
-        style={styles.button}
+        style={styles.newButton}
         accessibilityRole="button"
-        disabled={logout.isPending}
-        onPress={() => logout.mutate()}
+        onPress={() => router.push("/tasks/new")}
       >
-        {logout.isPending ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Sign Out</Text>
-        )}
+        <Text style={styles.newButtonText}>+ New Task</Text>
       </TouchableOpacity>
+
+      {tasks.isLoading && <ActivityIndicator style={styles.spacer} />}
+
+      {tasks.isError && (
+        <Text style={styles.error}>
+          Could not load tasks:{" "}
+          {tasks.error instanceof Error ? tasks.error.message : "unknown error"}
+        </Text>
+      )}
+
+      {tasks.data && tasks.data.length === 0 && (
+        <Text style={styles.empty}>No tasks yet — create your first one above.</Text>
+      )}
+
+      {tasks.data && tasks.data.length > 0 && (
+        <FlatList
+          data={tasks.data}
+          keyExtractor={(task) => task.id}
+          renderItem={({ item }) => <TaskRow task={item} />}
+          style={styles.list}
+        />
+      )}
 
       <StatusBar style="auto" />
     </View>
@@ -52,45 +118,37 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
+  container: { flex: 1, backgroundColor: "#fff", padding: 24 },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  title: { fontSize: 28, fontWeight: "700" },
+  subtitle: { fontSize: 13, color: "#666", marginTop: 2 },
+  signOut: { color: "#c0392b", fontWeight: "600" },
+  newButton: {
+    backgroundColor: "#1a7f37",
+    borderRadius: 8,
+    padding: 12,
     alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    padding: 24,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-  },
-  profile: {
-    fontSize: 15,
-    color: "#333",
-  },
-  label: {
-    fontSize: 14,
-    color: "#666",
     marginTop: 16,
   },
-  success: {
-    color: "#1a7f37",
-  },
-  error: {
-    color: "#c0392b",
-    textAlign: "center",
-  },
-  button: {
-    backgroundColor: "#c0392b",
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
+  newButtonText: { color: "#fff", fontWeight: "600", fontSize: 15 },
+  spacer: { marginTop: 24 },
+  empty: { marginTop: 24, color: "#666", textAlign: "center" },
+  error: { marginTop: 24, color: "#c0392b", textAlign: "center" },
+  list: { marginTop: 16 },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 24,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+    gap: 8,
   },
-  buttonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
-  },
+  rowMain: { flex: 1 },
+  rowTitle: { fontSize: 16, fontWeight: "600" },
+  rowTitleDone: { textDecorationLine: "line-through", color: "#888" },
+  rowStatus: { fontSize: 12, color: "#666", marginTop: 2 },
+  rowActions: { flexDirection: "row", gap: 16 },
+  actionText: { color: "#1a7f37", fontWeight: "600" },
+  deleteText: { color: "#c0392b", fontWeight: "600" },
 });

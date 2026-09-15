@@ -1,5 +1,6 @@
 // User and RefreshToken introduced in M2, per docs/DATABASE.md §4.
-// Task and TaskAssignment are introduced starting in M3 — not added yet.
+// Task introduced in M3 (self-owned only: creator == assignee always, no
+// TaskAssignment yet). priority/category/scheduledAt/deadline come in M4.
 
 generator client {
   provider = "prisma-client-js"
@@ -19,8 +20,43 @@ model User {
   updatedAt    DateTime @updatedAt
 
   refreshTokens RefreshToken[]
+  tasksCreated  Task[]         @relation("TaskCreator")
+  tasksAssigned Task[]         @relation("TaskAssignee")
 
   @@index([name])
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus @default(TODO)
+
+  creatorId String
+  creator   User   @relation("TaskCreator", fields: [creatorId], references: [id])
+
+  // Always the current responsible party; changes only when a TaskAssignment
+  // is ACCEPTED (introduced in M8+). In M3 always equal to creatorId.
+  assigneeId String
+  assignee   User   @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  // Not in DATABASE.md's original schema — added additively for M3's
+  // complete/uncomplete UX. Set when status transitions to DONE, cleared
+  // whenever it transitions away from DONE.
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assigneeId, status])
+  @@index([creatorId])
 }
 
 model RefreshToken {
