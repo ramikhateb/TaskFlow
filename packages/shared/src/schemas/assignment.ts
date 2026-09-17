@@ -53,13 +53,42 @@ export const taskAssignmentResponseSchema = z.object({
 });
 export type TaskAssignmentResponse = z.infer<typeof taskAssignmentResponseSchema>;
 
+// M10 (FR-32): server-computed authorization the client reflects rather
+// than infers. isAssignee/isCreator are mutually non-exclusive (true for
+// both on a self-owned task); canEdit/canDelete are currently identical
+// (PATCH and DELETE share the same "current assignee, not pending" rule)
+// but kept as separate fields since the two actions are authorized
+// independently in principle, not because their current values differ.
+export const taskViewerCapabilitiesSchema = z.object({
+  isAssignee: z.boolean(),
+  isCreator: z.boolean(),
+  canEdit: z.boolean(),
+  canDelete: z.boolean(),
+});
+export type TaskViewerCapabilities = z.infer<typeof taskViewerCapabilitiesSchema>;
+
 // GET /tasks/:id only: the plain TaskResponse (used by list/create/update
 // too) additively gains the task's current PENDING assignment, if any. Not
 // a stored/duplicated column — computed at read time from TaskAssignment,
 // which remains the sole source of truth (see the M8 report's "how mobile
 // learns pending state" explanation).
+//
+// M10 additively gains `assignee`/`creator` (PublicUser identity — PRODUCT.md:
+// "both remain visible on the task") and `viewer` (server-computed
+// capabilities, see above). `scheduledAt` — inherited from taskResponseSchema
+// — is a special case: for a non-assignee (creator-only) viewer, the server
+// always sends `null` here regardless of the task's real stored value, since
+// scheduledAt is the *current assignee's* personal planning state, not part
+// of what a creator-only viewer is entitled to see (see the M10 report's
+// "how recipient scheduledAt is hidden from creator" section). The mobile
+// client must key its rendering off `viewer.isAssignee`, never off whether
+// `scheduledAt` happens to be null, since a assignee-visible task can
+// legitimately have a null scheduledAt too (simply unscheduled).
 export const taskDetailResponseSchema = taskResponseSchema.extend({
   pendingAssignment: taskAssignmentResponseSchema.nullable(),
+  assignee: publicUserSchema,
+  creator: publicUserSchema,
+  viewer: taskViewerCapabilitiesSchema,
 });
 export type TaskDetailResponse = z.infer<typeof taskDetailResponseSchema>;
 
@@ -118,3 +147,31 @@ export const inboxResponseSchema = z.object({
   data: z.array(inboxAssignmentResponseSchema),
 });
 export type InboxResponse = z.infer<typeof inboxResponseSchema>;
+
+// M10 Sent (FR-29) — the sender's own history of requests, so unlike Inbox
+// it includes every terminal status (PENDING/ACCEPTED/DECLINED/CANCELLED),
+// not just PENDING, and carries `respondedAt` (always null in Inbox, since
+// everything there is still PENDING by definition). Reuses
+// `inboxTaskSummarySchema` for the task field rather than defining a
+// near-duplicate: the same "no scheduledAt" rule applies for exactly the
+// same reason — after ACCEPTED, scheduledAt is the *recipient's* personal
+// planning state, and the sender/creator must never see it here either
+// (see the M10 report's "how recipient scheduledAt is hidden from creator"
+// section — this is the Sent-list side of that same rule, not a separate
+// one). `toUser` (the recipient), not `fromUser` (always the caller here,
+// so redundant, mirroring Inbox's own omission of the redundant side).
+export const sentAssignmentResponseSchema = z.object({
+  id: z.string(),
+  status: assignmentStatusSchema,
+  message: z.string().nullable(),
+  createdAt: z.string(),
+  respondedAt: z.string().nullable(),
+  toUser: publicUserSchema,
+  task: inboxTaskSummarySchema,
+});
+export type SentAssignmentResponse = z.infer<typeof sentAssignmentResponseSchema>;
+
+export const sentAssignmentsResponseSchema = z.object({
+  data: z.array(sentAssignmentResponseSchema),
+});
+export type SentAssignmentsResponse = z.infer<typeof sentAssignmentsResponseSchema>;

@@ -46,6 +46,12 @@ export function createFakeTaskAssignmentRepository(users: Map<string, User>, tas
         .map(withRelations)
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     },
+    async findSentByUser(fromUserId) {
+      return assignments
+        .filter((a) => a.fromUserId === fromUserId)
+        .map(withRelations)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    },
     async create(data) {
       const alreadyPending = assignments.some(
         (a) => a.taskId === data.taskId && a.status === "PENDING",

@@ -212,14 +212,64 @@ export default function TaskDetailScreen() {
   }
 
   const nextStep = nextStepFor(task.data.status);
-  // FR-13/EC-5: while a PENDING assignment exists, every mutation is
-  // frozen server-side (taskService.updateTask/deleteTask reject with 409)
-  // — this only makes that visible/explained in the UI ahead of time,
-  // rather than letting the user hit an error after tapping Save. The
-  // AssignmentSection below is deliberately NOT gated by this: cancelling
-  // the pending assignment must stay available (that's the one action that
-  // lifts the freeze).
-  const isFrozen = task.data.pendingAssignment !== null;
+  // M10 (FR-32): the server is the sole authority on what this viewer may
+  // do — `viewer` is computed by TaskService.getTaskDetail, never inferred
+  // here from missing fields or fragile id comparisons. `canEdit`/
+  // `canDelete` already fold in BOTH reasons a mutation might be
+  // unavailable: the caller isn't the current assignee at all (creator-only,
+  // M10), or they are the assignee but a PENDING assignment currently
+  // freezes the task (FR-13/EC-5, M8) — the two are distinguished below only
+  // to show the right explanatory copy, not to re-derive authorization.
+  const { viewer } = task.data;
+  const isFrozenByPending = viewer.isAssignee && !viewer.canEdit;
+
+  // Creator-only viewer (M10): a completely different, read-only screen —
+  // no edit form, no Save/Mark Done/Delete, no assign flow (only the
+  // current assignee may send/cancel assignments). scheduledAt is never
+  // rendered here at all, on top of the server already sending it as null
+  // for this viewer — belt and suspenders against ever displaying it.
+  if (!viewer.isAssignee) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <View style={styles.statusRow}>
+          <Text style={styles.status}>{task.data.status.replace("_", " ")}</Text>
+          <Text style={[styles.priorityBadge, { color: PRIORITY_COLORS[task.data.priority] }]}>
+            {priorityLabel(task.data.priority)} priority
+          </Text>
+        </View>
+
+        <View style={styles.readOnlyNotice}>
+          <Text style={styles.readOnlyNoticeText}>
+            Assigned to {task.data.assignee.name} · @{task.data.assignee.username} — you created
+            this task but are no longer responsible for it, so it&apos;s read-only here.
+          </Text>
+        </View>
+
+        <Text style={styles.readOnlyTitle}>{task.data.title}</Text>
+        {task.data.description && (
+          <Text style={styles.readOnlyDescription}>{task.data.description}</Text>
+        )}
+        {task.data.category && (
+          <Text style={styles.readOnlyMeta}>Category: {task.data.category}</Text>
+        )}
+        {task.data.deadline && (
+          <Text style={styles.readOnlyMeta}>
+            Deadline:{" "}
+            {new Date(task.data.deadline).toLocaleString(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+          </Text>
+        )}
+        {task.data.pendingAssignment && (
+          <Text style={styles.readOnlyMeta}>
+            Pending transfer to {task.data.pendingAssignment.toUser.name} · @
+            {task.data.pendingAssignment.toUser.username}
+          </Text>
+        )}
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -230,7 +280,7 @@ export default function TaskDetailScreen() {
         </Text>
       </View>
 
-      {isFrozen && (
+      {isFrozenByPending && (
         <View style={styles.frozenNotice}>
           <Text style={styles.frozenNoticeText}>
             Awaiting {task.data.pendingAssignment!.toUser.name}&apos;s response — editing,
@@ -245,7 +295,7 @@ export default function TaskDetailScreen() {
         accessibilityLabel="Title"
         value={title}
         onChangeText={setTitle}
-        editable={!isFrozen}
+        editable={viewer.canEdit}
       />
       <TextInput
         style={[styles.input, styles.multiline]}
@@ -254,10 +304,10 @@ export default function TaskDetailScreen() {
         value={description}
         onChangeText={setDescription}
         multiline
-        editable={!isFrozen}
+        editable={viewer.canEdit}
       />
 
-      <PrioritySelector value={priority} onChange={setPriority} disabled={isFrozen} />
+      <PrioritySelector value={priority} onChange={setPriority} disabled={!viewer.canEdit} />
 
       <TextInput
         style={styles.input}
@@ -265,27 +315,27 @@ export default function TaskDetailScreen() {
         accessibilityLabel="Category"
         value={category}
         onChangeText={setCategory}
-        editable={!isFrozen}
+        editable={viewer.canEdit}
       />
 
       <DateTimeField
         label="Scheduled — when you plan to do this"
         value={scheduledAt}
         onChange={setScheduledAt}
-        disabled={isFrozen}
+        disabled={!viewer.canEdit}
       />
       <DateTimeField
         label="Deadline — when it must be done by"
         value={deadline}
         onChange={setDeadline}
-        disabled={isFrozen}
+        disabled={!viewer.canEdit}
       />
 
       <TouchableOpacity
-        style={[styles.button, isFrozen && styles.buttonDisabled]}
+        style={[styles.button, !viewer.canEdit && styles.buttonDisabled]}
         accessibilityRole="button"
-        accessibilityState={{ disabled: isFrozen || updateTask.isPending }}
-        disabled={isFrozen || updateTask.isPending}
+        accessibilityState={{ disabled: !viewer.canEdit || updateTask.isPending }}
+        disabled={!viewer.canEdit || updateTask.isPending}
         onPress={() =>
           updateTask.mutate({
             title,
@@ -306,10 +356,10 @@ export default function TaskDetailScreen() {
 
       {nextStep && (
         <TouchableOpacity
-          style={[styles.button, styles.secondaryButton, isFrozen && styles.buttonDisabled]}
+          style={[styles.button, styles.secondaryButton, !viewer.canEdit && styles.buttonDisabled]}
           accessibilityRole="button"
-          accessibilityState={{ disabled: isFrozen || updateTask.isPending }}
-          disabled={isFrozen || updateTask.isPending}
+          accessibilityState={{ disabled: !viewer.canEdit || updateTask.isPending }}
+          disabled={!viewer.canEdit || updateTask.isPending}
           onPress={() => updateTask.mutate({ status: nextStep.to })}
         >
           <Text style={styles.secondaryButtonText}>{nextStep.label}</Text>
@@ -323,10 +373,10 @@ export default function TaskDetailScreen() {
       />
 
       <TouchableOpacity
-        style={[styles.button, styles.deleteButton, isFrozen && styles.buttonDisabled]}
+        style={[styles.button, styles.deleteButton, !viewer.canDelete && styles.buttonDisabled]}
         accessibilityRole="button"
-        accessibilityState={{ disabled: isFrozen || deleteTask.isPending }}
-        disabled={isFrozen || deleteTask.isPending}
+        accessibilityState={{ disabled: !viewer.canDelete || deleteTask.isPending }}
+        disabled={!viewer.canDelete || deleteTask.isPending}
         onPress={() => deleteTask.mutate(id, { onSuccess: () => router.back() })}
       >
         <Text style={styles.deleteButtonText}>Delete</Text>
@@ -370,4 +420,13 @@ const styles = StyleSheet.create({
   assignPanel: { gap: 12 },
   assignPanelActions: { flexDirection: "row", gap: 12 },
   assignPanelButton: { flex: 1 },
+  readOnlyNotice: {
+    backgroundColor: "#eef2f7",
+    borderRadius: 8,
+    padding: 12,
+  },
+  readOnlyNoticeText: { color: "#3a4a5c", fontSize: 13, lineHeight: 18 },
+  readOnlyTitle: { fontSize: 22, fontWeight: "700" },
+  readOnlyDescription: { fontSize: 15, color: "#333" },
+  readOnlyMeta: { fontSize: 13, color: "#666" },
 });

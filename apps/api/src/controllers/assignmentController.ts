@@ -60,5 +60,12 @@ export function createAssignmentController(assignmentService: AssignmentService)
     res.status(200).json(result);
   });
 
-  return { create, cancel, decline, accept, inbox };
+  // M10 — the sender's own history (FR-29). Same "no query params read"
+  // rule as inbox: fromUserId is always the verified caller.
+  const sent = asyncHandler(async (req: Request, res: Response) => {
+    const result = await assignmentService.getSentAssignments(requireUserId(req));
+    res.status(200).json(result);
+  });
+
+  return { create, cancel, decline, accept, inbox, sent };
 }

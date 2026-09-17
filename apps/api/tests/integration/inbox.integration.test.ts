@@ -544,7 +544,7 @@ describe("POST /assignments/:assignmentId/accept", () => {
 });
 
 describe("Accept — assignee-scoped access transfer", () => {
-  it("the sender loses assignee-scoped read access after acceptance", async () => {
+  it("the sender loses assignee-scoped WRITE access after acceptance, but keeps read-only creator access (M10, FR-32)", async () => {
     const rami = await registerUser("rami@example.com", "Rami");
     const daniel = await registerUser("daniel@example.com", "Daniel");
     const task = await createTask(rami.accessToken);
@@ -554,13 +554,21 @@ describe("Accept — assignee-scoped access transfer", () => {
       .set("Authorization", `Bearer ${daniel.accessToken}`)
       .send({ scheduledAt: null });
 
-    // FR-32 (creator read-only visibility) is explicitly M10 — until then,
-    // a non-assignee (even the original creator/sender) gets a plain 404,
-    // matching every other task-ownership check in this API.
+    // M10 supersedes the M9-era behavior here: the original creator now
+    // retains permanent read-only visibility after a transfer (FR-32),
+    // rather than a plain 404 — see tests/integration/creatorVisibility
+    // .integration.test.ts for the full read/write matrix this implies.
     const res = await request(app)
       .get(`/tasks/${task.id}`)
       .set("Authorization", `Bearer ${rami.accessToken}`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect(res.body.viewer).toMatchObject({ isAssignee: false, isCreator: true, canEdit: false });
+
+    const patchRes = await request(app)
+      .patch(`/tasks/${task.id}`)
+      .set("Authorization", `Bearer ${rami.accessToken}`)
+      .send({ title: "Rami cannot do this" });
+    expect(patchRes.status).toBe(404);
   });
 
   it("the recipient gains assignee-scoped read/write access after acceptance", async () => {

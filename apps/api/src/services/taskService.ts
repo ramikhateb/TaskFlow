@@ -1,4 +1,4 @@
-import type { Task, TaskPriority, TaskStatus } from "@prisma/client";
+import type { Task, TaskPriority, TaskStatus, User } from "@prisma/client";
 import type {
   CreateTaskRequest,
   DateRangeQuery,
@@ -10,7 +10,7 @@ import type {
 } from "@taskflow/shared";
 import { ConflictError, NotFoundError } from "../errors";
 import { isScheduleValid } from "../lib/scheduling";
-import { toAssignmentResponse } from "../mappers/assignmentResponse";
+import { toAssignmentResponse, toPublicUser } from "../mappers/assignmentResponse";
 import type { TaskAssignmentWithUsers } from "../repositories/taskAssignmentRepository";
 
 // Narrow interface (matching the repository module's shape) so this service
@@ -66,9 +66,21 @@ export interface PendingAssignmentRepository {
   findPendingByTaskId(taskId: string): Promise<TaskAssignmentWithUsers | null>;
 }
 
+// M10 (FR-32): the task-detail response identifies the assignee/creator by
+// PublicUser (id/name/username — see PRODUCT.md "both remain visible on the
+// task"), which needs a user lookup taskService didn't previously depend on.
+// A narrow, repository-level interface — identical in shape to
+// AssignmentService's own UserLookupRepository, but declared independently,
+// per this architecture's "services never import each other" rule — rather
+// than a dependency on UserService or AssignmentService.
+export interface UserLookupRepository {
+  findById(userId: string): Promise<User | null>;
+}
+
 export interface TaskServiceDeps {
   taskRepository: TaskRepository;
   assignmentRepository: PendingAssignmentRepository;
+  userRepository: UserLookupRepository;
 }
 
 // Product decision (2026-09-15): TODO, IN_PROGRESS, and DONE are fully
@@ -170,16 +182,36 @@ function toTaskResponse(task: Task): TaskResponse {
   };
 }
 
-export function createTaskService({ taskRepository, assignmentRepository }: TaskServiceDeps) {
-  // M3 is self-owned only (no TaskAssignment yet — ROADMAP.md M3), so every
-  // authorization check here is keyed on assigneeId alone, per DATABASE.md's
-  // invariant that assigneeId is the sole source of truth for who's
-  // responsible. A task that exists but isn't the caller's own is reported
-  // as NotFoundError, not ForbiddenError, so its existence isn't confirmed
-  // to a caller with no relationship to it (ARCHITECTURE.md §4).
+export function createTaskService({
+  taskRepository,
+  assignmentRepository,
+  userRepository,
+}: TaskServiceDeps) {
+  // Mutation authorization (PATCH/DELETE) — unchanged since M3, and
+  // deliberately NOT widened by M10: creatorId must never substitute for
+  // assigneeId here. Every check is keyed on assigneeId alone, per
+  // DATABASE.md's invariant that assigneeId is the sole source of truth for
+  // who's currently responsible. A task that exists but isn't the caller's
+  // own is reported as NotFoundError, not ForbiddenError, so its existence
+  // isn't confirmed to a caller with no relationship to it (ARCHITECTURE.md
+  // §4).
   async function findOwnTaskOrThrow(userId: string, taskId: string): Promise<Task> {
     const task = await taskRepository.findById(taskId);
     if (!task || task.assigneeId !== userId) {
+      throw new NotFoundError("Task not found");
+    }
+    return task;
+  }
+
+  // Read authorization (GET) — M10, FR-32: broader than mutation
+  // authorization. The original creator retains permanent READ-ONLY
+  // visibility after a transfer, so this additionally allows creatorId to
+  // match. Used only by getTask/getTaskDetail below; updateTask/deleteTask
+  // continue to call findOwnTaskOrThrow above, unchanged, so a creator can
+  // never mutate a task they no longer hold.
+  async function findVisibleTaskOrThrow(userId: string, taskId: string): Promise<Task> {
+    const task = await taskRepository.findById(taskId);
+    if (!task || (task.assigneeId !== userId && task.creatorId !== userId)) {
       throw new NotFoundError("Task not found");
     }
     return task;
@@ -220,19 +252,61 @@ export function createTaskService({ taskRepository, assignmentRepository }: Task
     return toTaskResponse(task);
   }
 
+  // M10: visible to assignee OR creator (findVisibleTaskOrThrow), not
+  // assignee-only. Returns the RAW, unmasked TaskResponse — including the
+  // real scheduledAt — regardless of which of the two the caller is.
+  // Safe today because this has exactly one caller (getTaskDetail below,
+  // which applies the creator-only scheduledAt mask before anything reaches
+  // the HTTP response); it is NOT safe to wire a new caller directly to
+  // this function for a possibly-creator-only viewer without that mask.
   async function getTask(userId: string, taskId: string): Promise<TaskResponse> {
-    const task = await findOwnTaskOrThrow(userId, taskId);
+    const task = await findVisibleTaskOrThrow(userId, taskId);
     return toTaskResponse(task);
   }
 
-  // GET /tasks/:id (M8): additively merges the task's current pending
-  // assignment (if any) into the detail response. Built here, not in the
-  // controller, and from a repository dependency, not AssignmentService —
-  // see PendingAssignmentRepository above.
+  // GET /tasks/:id: additively merges the task's current pending assignment
+  // (M8), viewer capabilities and assignee/creator identity (M10), into the
+  // detail response. Built here, not in the controller, and from
+  // repository dependencies, not AssignmentService/UserService — see
+  // PendingAssignmentRepository/UserLookupRepository above.
   async function getTaskDetail(userId: string, taskId: string): Promise<TaskDetailResponse> {
     const task = await getTask(userId, taskId);
-    const pending = await assignmentRepository.findPendingByTaskId(taskId);
-    return { ...task, pendingAssignment: pending ? toAssignmentResponse(pending) : null };
+    const isAssignee = task.assigneeId === userId;
+    const isCreator = task.creatorId === userId;
+
+    const [pending, assigneeUser, creatorUser] = await Promise.all([
+      assignmentRepository.findPendingByTaskId(taskId),
+      userRepository.findById(task.assigneeId),
+      userRepository.findById(task.creatorId),
+    ]);
+    // Structurally impossible (Task.assigneeId/creatorId are required FKs)
+    // but keeps this function total rather than fabricating a response.
+    if (!assigneeUser || !creatorUser) {
+      throw new NotFoundError("Task not found");
+    }
+
+    return {
+      ...task,
+      // M10: scheduledAt is the current assignee's personal planning
+      // state — a creator-only viewer never sees the real value, even
+      // though every other field (including deadline/priority/category)
+      // is visible. See taskDetailResponseSchema's comment for why the
+      // mobile client must key off `viewer.isAssignee`, not off whether
+      // this happens to be null.
+      scheduledAt: isAssignee ? task.scheduledAt : null,
+      pendingAssignment: pending ? toAssignmentResponse(pending) : null,
+      assignee: toPublicUser(assigneeUser),
+      creator: toPublicUser(creatorUser),
+      viewer: {
+        isAssignee,
+        isCreator,
+        // Mutation rules are unchanged (findOwnTaskOrThrow/assertNotPending
+        // below) — these two fields are that same rule reflected back to
+        // the client, not a second, independent authorization decision.
+        canEdit: isAssignee && pending === null,
+        canDelete: isAssignee && pending === null,
+      },
+    };
   }
 
   // FR-13/EC-5: while a task has a PENDING assignment, the current assignee

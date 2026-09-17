@@ -32,6 +32,23 @@ export function findInboxForRecipient(toUserId: string): Promise<TaskAssignmentW
   });
 }
 
+/**
+ * Sent (FR-29, M10): the sender's full history of requests, not just
+ * PENDING ones — unlike Inbox, this is a historical record, not an
+ * actionable queue, so every terminal status is included. `WHERE
+ * fromUserId = ?` (no status filter) still uses the leading column of the
+ * existing @@index([fromUserId, status]) composite index — a Postgres
+ * btree index is usable by any prefix of its columns, so this doesn't need
+ * a separate single-column index.
+ */
+export function findSentByUser(fromUserId: string): Promise<TaskAssignmentWithUsers[]> {
+  return prisma.taskAssignment.findMany({
+    where: { fromUserId },
+    include,
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 export async function create(data: {
   taskId: string;
   fromUserId: string;

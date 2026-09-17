@@ -12,6 +12,7 @@ import { requireAuth } from "../middleware/auth";
 import { validateBody, validateParams, validateQuery } from "../middleware/validate";
 import * as taskAssignmentRepository from "../repositories/taskAssignmentRepository";
 import * as taskRepository from "../repositories/taskRepository";
+import * as userRepository from "../repositories/userRepository";
 import { createTaskService } from "../services/taskService";
 
 export function createTaskRoutes(env: Env): Router {
@@ -19,10 +20,13 @@ export function createTaskRoutes(env: Env): Router {
   // AssignmentService) both to build GET /tasks/:id's additive
   // pendingAssignment field and to enforce FR-13/EC-5 (freeze mutations
   // while PENDING) — a repository-level dependency, not a cross-service
-  // one. See docs/ARCHITECTURE.md and the M8 follow-up report.
+  // one. See docs/ARCHITECTURE.md and the M8 follow-up report. M10 adds a
+  // userRepository dependency too, to resolve the assignee/creator
+  // PublicUser identity shown on the task-detail response.
   const taskService = createTaskService({
     taskRepository,
     assignmentRepository: taskAssignmentRepository,
+    userRepository,
   });
   const controller = createTaskController(taskService);
   const router = Router();

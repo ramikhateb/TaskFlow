@@ -17,7 +17,8 @@ import { createAssignmentService } from "../services/assignmentService";
  * recipient doesn't necessarily know or care about the task's id up
  * front — they're browsing their Inbox, not a specific task). See
  * docs/ARCHITECTURE.md §3 for the create/cancel-vs-accept/decline route
- * shape rationale.
+ * shape rationale. M10 adds Sent (FR-29) alongside Inbox here, for the
+ * same reason: scoped to the caller as sender (fromUserId), not to a task.
  *
  * Builds its own AssignmentService instance from the same repository
  * modules assignmentRoutes.ts/taskRoutes.ts use — independent instances
@@ -36,6 +37,11 @@ export function createInboxRoutes(env: Env): Router {
   router.use(requireAuth(env));
 
   router.get("/inbox", controller.inbox);
+  // M10 (FR-29): the sender's history — every terminal status, newest
+  // first. No :assignmentId param, so registration order relative to the
+  // POST routes below doesn't matter (different HTTP method and path
+  // shape; Express dispatches on both).
+  router.get("/sent", controller.sent);
   router.post(
     "/:assignmentId/accept",
     validateParams(assignmentIdRouteParamSchema),

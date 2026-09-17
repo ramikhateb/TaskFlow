@@ -4,15 +4,28 @@ import {
   acceptAssignmentRequest,
   declineAssignmentRequest,
   getInboxRequest,
+  getSentAssignmentsRequest,
 } from "../../api/assignments";
 import { TASKS_QUERY_KEY } from "../tasks/useTasks";
 
 export const INBOX_QUERY_KEY = ["inbox"] as const;
+// M10 (FR-29). Exported so useCancelAssignment (features/tasks/
+// useAssignments.ts) can also invalidate Sent when a sender cancels from
+// there — the same cross-feature invalidation pattern useAcceptAssignment
+// below already uses in the other direction (importing TASKS_QUERY_KEY).
+export const SENT_QUERY_KEY = ["sentAssignments"] as const;
 
 export function useInbox() {
   return useQuery({
     queryKey: INBOX_QUERY_KEY,
     queryFn: async () => (await getInboxRequest()).data,
+  });
+}
+
+export function useSentAssignments() {
+  return useQuery({
+    queryKey: SENT_QUERY_KEY,
+    queryFn: async () => (await getSentAssignmentsRequest()).data,
   });
 }
 

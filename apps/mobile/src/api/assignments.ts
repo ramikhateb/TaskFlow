@@ -1,9 +1,11 @@
 import {
   inboxResponseSchema,
+  sentAssignmentsResponseSchema,
   taskAssignmentResponseSchema,
   type AcceptTaskAssignmentRequest,
   type CreateTaskAssignmentRequest,
   type InboxResponse,
+  type SentAssignmentsResponse,
   type TaskAssignmentResponse,
 } from "@taskflow/shared";
 import { apiFetch } from "./client";
@@ -59,4 +61,11 @@ export async function declineAssignmentRequest(
     auth: true,
   });
   return taskAssignmentResponseSchema.parse(data);
+}
+
+// M10 (FR-29): the sender's own history — every terminal status, not just
+// PENDING (that's Inbox). Same flat "/assignments" root.
+export async function getSentAssignmentsRequest(): Promise<SentAssignmentsResponse> {
+  const data = await apiFetch<unknown>("/assignments/sent", { auth: true });
+  return sentAssignmentsResponseSchema.parse(data);
 }

@@ -8,6 +8,7 @@ import {
   isScheduleValid,
   isValidStatusTransition,
   type PendingAssignmentRepository,
+  type UserLookupRepository,
 } from "../../src/services/taskService";
 import { createFakeTaskRepository } from "../helpers/fakeTaskRepository";
 
@@ -79,12 +80,34 @@ function buildService() {
       return pendingAssignment && pendingAssignment.taskId === taskId ? pendingAssignment : null;
     },
   };
-  const service = createTaskService({ taskRepository, assignmentRepository });
+  // M10: getTaskDetail resolves assignee/creator identity via this — every
+  // test that reaches getTaskDetail successfully needs its user(s)
+  // registered here first.
+  const users = new Map<string, User>([
+    [USER_A, makeFakeUser({ id: USER_A, name: "User A", username: "usera" })],
+    [USER_B, makeFakeUser({ id: USER_B, name: "User B", username: "userb" })],
+  ]);
+  const userRepository: UserLookupRepository = {
+    async findById(userId) {
+      return users.get(userId) ?? null;
+    },
+  };
+  const service = createTaskService({ taskRepository, assignmentRepository, userRepository });
   return {
     service,
     tasks,
     taskRepository,
     pendingTaskIds,
+    users,
+    // For tests needing a third party with no relationship to the task at
+    // all (neither creator nor assignee) — USER_A/USER_B are both already
+    // used as creator/assignee across these tests, so a fresh id avoids
+    // accidental overlap.
+    registerThirdUser: (): string => {
+      const id = "user-c";
+      users.set(id, makeFakeUser({ id, name: "Carol", username: "carol" }));
+      return id;
+    },
     setPendingAssignment: (assignment: TaskAssignmentWithUsers | null) => {
       pendingAssignment = assignment;
     },
@@ -860,6 +883,160 @@ describe("taskService.getTaskDetail (M8)", () => {
     const created = await service.createTask(USER_A, { title: "Task" });
 
     await expect(service.getTaskDetail(USER_B, created.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// M10 (FR-32): the original creator retains permanent READ-ONLY visibility
+// after a transfer. These simulate "already transferred" directly via the
+// fake repository's own `.update` (not through assignmentService, which
+// taskService never depends on — see the M9/M10 architecture notes above),
+// exactly like the existing pending-assignment freeze tests do for status.
+describe("taskService — creator visibility after transfer (M10, FR-32)", () => {
+  it("getTask allows the creator to read a task they no longer hold", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    await expect(service.getTask(USER_A, created.id)).resolves.toMatchObject({
+      id: created.id,
+      creatorId: USER_A,
+      assigneeId: USER_B,
+    });
+  });
+
+  it("getTask still rejects a completely unrelated user (neither creator nor assignee)", async () => {
+    const { service, taskRepository, registerThirdUser } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+    const carol = registerThirdUser();
+
+    await expect(service.getTask(carol, created.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("getTaskDetail marks a self-owned task's viewer as both assignee and creator, fully editable", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+
+    const detail = await service.getTaskDetail(USER_A, created.id);
+
+    expect(detail.viewer).toEqual({
+      isAssignee: true,
+      isCreator: true,
+      canEdit: true,
+      canDelete: true,
+    });
+  });
+
+  it("getTaskDetail marks a creator-only viewer as not-assignee, read-only", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    const detail = await service.getTaskDetail(USER_A, created.id);
+
+    expect(detail.viewer).toEqual({
+      isAssignee: false,
+      isCreator: true,
+      canEdit: false,
+      canDelete: false,
+    });
+  });
+
+  it("getTaskDetail marks the new assignee (non-creator) as assignee-only, fully editable", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    const detail = await service.getTaskDetail(USER_B, created.id);
+
+    expect(detail.viewer).toEqual({
+      isAssignee: true,
+      isCreator: false,
+      canEdit: true,
+      canDelete: true,
+    });
+  });
+
+  it("hides the real scheduledAt from a creator-only viewer", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, {
+      title: "Task",
+      scheduledAt: "2026-09-26T14:00:00.000Z",
+    });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    const detail = await service.getTaskDetail(USER_A, created.id);
+
+    expect(detail.scheduledAt).toBeNull();
+  });
+
+  it("still shows the real scheduledAt to the current assignee", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, {
+      title: "Task",
+      scheduledAt: "2026-09-26T14:00:00.000Z",
+    });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    const detail = await service.getTaskDetail(USER_B, created.id);
+
+    expect(detail.scheduledAt).toBe("2026-09-26T14:00:00.000Z");
+  });
+
+  it("does not mask completedAt for a creator-only viewer", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    await service.updateTask(USER_A, created.id, { status: "DONE" });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    const detail = await service.getTaskDetail(USER_A, created.id);
+
+    expect(detail.completedAt).not.toBeNull();
+  });
+
+  it("includes assignee and creator as PublicUser (id/name/username, no email)", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    const detail = await service.getTaskDetail(USER_A, created.id);
+
+    expect(detail.creator).toEqual({ id: USER_A, name: "User A", username: "usera" });
+    expect(detail.assignee).toEqual({ id: USER_B, name: "User B", username: "userb" });
+  });
+
+  it("canEdit/canDelete are false for the current assignee while a pending assignment freezes the task", async () => {
+    const { service, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+
+    const detail = await service.getTaskDetail(USER_A, created.id);
+
+    expect(detail.viewer.isAssignee).toBe(true);
+    expect(detail.viewer.canEdit).toBe(false);
+    expect(detail.viewer.canDelete).toBe(false);
+  });
+
+  it("mutation authorization is unchanged: the creator-only viewer cannot PATCH or DELETE", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    await expect(
+      service.updateTask(USER_A, created.id, { title: "Rami cannot do this" }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.deleteTask(USER_A, created.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("mutation authorization is unchanged: the new assignee can PATCH and DELETE normally", async () => {
+    const { service, taskRepository } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    await taskRepository.update(created.id, { assigneeId: USER_B });
+
+    await expect(
+      service.updateTask(USER_B, created.id, { title: "Daniel's task now" }),
+    ).resolves.toMatchObject({ title: "Daniel's task now" });
+    await expect(service.deleteTask(USER_B, created.id)).resolves.toBeUndefined();
   });
 });
 

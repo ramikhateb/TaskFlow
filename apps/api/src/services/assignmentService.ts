@@ -3,11 +3,16 @@ import type {
   AcceptTaskAssignmentRequest,
   CreateTaskAssignmentRequest,
   InboxResponse,
+  SentAssignmentsResponse,
   TaskAssignmentResponse,
 } from "@taskflow/shared";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { isScheduleValid } from "../lib/scheduling";
-import { toAssignmentResponse, toInboxAssignmentResponse } from "../mappers/assignmentResponse";
+import {
+  toAssignmentResponse,
+  toInboxAssignmentResponse,
+  toSentAssignmentResponse,
+} from "../mappers/assignmentResponse";
 import {
   DuplicatePendingAssignmentError,
   type TaskAssignmentWithUsers,
@@ -20,6 +25,7 @@ export interface TaskAssignmentRepository {
   findById(id: string): Promise<TaskAssignmentWithUsers | null>;
   findPendingByTaskId(taskId: string): Promise<TaskAssignmentWithUsers | null>;
   findInboxForRecipient(toUserId: string): Promise<TaskAssignmentWithUsers[]>;
+  findSentByUser(fromUserId: string): Promise<TaskAssignmentWithUsers[]>;
   create(data: {
     taskId: string;
     fromUserId: string;
@@ -237,7 +243,24 @@ export function createAssignmentService({
     return { data: rows.map(toInboxAssignmentResponse) };
   }
 
-  return { createAssignment, cancelAssignment, declineAssignment, acceptAssignment, getInbox };
+  // FR-29 (M10): the sender's full history — every terminal status, not
+  // just PENDING (that distinction from Inbox is the whole point: this is
+  // "what happened to the requests I sent," not an actionable queue).
+  // Scoped exclusively via fromUserId from the verified caller, same as
+  // Inbox's toUserId — never a client-supplied user id.
+  async function getSentAssignments(callerId: string): Promise<SentAssignmentsResponse> {
+    const rows = await assignmentRepository.findSentByUser(callerId);
+    return { data: rows.map(toSentAssignmentResponse) };
+  }
+
+  return {
+    createAssignment,
+    cancelAssignment,
+    declineAssignment,
+    acceptAssignment,
+    getInbox,
+    getSentAssignments,
+  };
 }
 
 export type AssignmentService = ReturnType<typeof createAssignmentService>;

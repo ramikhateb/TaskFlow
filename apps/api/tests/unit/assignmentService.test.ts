@@ -921,3 +921,188 @@ describe("assignmentService.getInbox (M9, FR-28)", () => {
     expect(Object.keys(inbox.data[0]!.fromUser)).toEqual(["id", "name", "username"]);
   });
 });
+
+describe("assignmentService.getSentAssignments (M10, FR-29)", () => {
+  it("returns an empty list when the caller has sent nothing", async () => {
+    const { service, registerUser } = buildService();
+    const rami = registerUser({ name: "Rami", username: "rami" });
+
+    await expect(service.getSentAssignments(rami.id)).resolves.toEqual({ data: [] });
+  });
+
+  it("returns the sender's own sent assignments", async () => {
+    const { service, taskRepository, registerUser } = buildService();
+    const rami = registerUser({ name: "Rami", username: "rami" });
+    const daniel = registerUser({ name: "Daniel", username: "daniel" });
+    const task = await taskRepository.create({
+      title: "Prepare presentation",
+      description: null,
+      priority: "MEDIUM",
+      category: null,
+      scheduledAt: null,
+      deadline: null,
+      creatorId: rami.id,
+      assigneeId: rami.id,
+    });
+    const created = await service.createAssignment(rami.id, task.id, {
+      toUserId: daniel.id,
+      message: "please help",
+    });
+
+    const sent = await service.getSentAssignments(rami.id);
+
+    expect(sent.data).toHaveLength(1);
+    expect(sent.data[0]).toMatchObject({
+      id: created.id,
+      status: "PENDING",
+      message: "please help",
+      toUser: { id: daniel.id, name: "Daniel", username: "daniel" },
+      task: { id: task.id, title: "Prepare presentation" },
+    });
+  });
+
+  it("excludes another user's sent assignments", async () => {
+    const { service, taskRepository, registerUser } = buildService();
+    const rami = registerUser({ name: "Rami", username: "rami" });
+    const daniel = registerUser({ name: "Daniel", username: "daniel" });
+    const task = await taskRepository.create({
+      title: "Task",
+      description: null,
+      priority: "MEDIUM",
+      category: null,
+      scheduledAt: null,
+      deadline: null,
+      creatorId: rami.id,
+      assigneeId: rami.id,
+    });
+    await service.createAssignment(rami.id, task.id, { toUserId: daniel.id });
+
+    await expect(service.getSentAssignments(daniel.id)).resolves.toEqual({ data: [] });
+  });
+
+  it.each(["PENDING", "ACCEPTED", "DECLINED", "CANCELLED"] as const)(
+    "includes a %s assignment (unlike Inbox, Sent is historical, not PENDING-only)",
+    async (targetStatus) => {
+      const { service, taskRepository, registerUser } = buildService();
+      const rami = registerUser({ name: "Rami", username: "rami" });
+      const daniel = registerUser({ name: "Daniel", username: "daniel" });
+      const task = await taskRepository.create({
+        title: "Task",
+        description: null,
+        priority: "MEDIUM",
+        category: null,
+        scheduledAt: null,
+        deadline: null,
+        creatorId: rami.id,
+        assigneeId: rami.id,
+      });
+      const created = await service.createAssignment(rami.id, task.id, { toUserId: daniel.id });
+      if (targetStatus === "ACCEPTED") {
+        await service.acceptAssignment(daniel.id, created.id, { scheduledAt: null });
+      } else if (targetStatus === "DECLINED") {
+        await service.declineAssignment(daniel.id, created.id);
+      } else if (targetStatus === "CANCELLED") {
+        await service.cancelAssignment(rami.id, task.id, created.id);
+      }
+
+      const sent = await service.getSentAssignments(rami.id);
+
+      expect(sent.data).toHaveLength(1);
+      expect(sent.data[0]?.status).toBe(targetStatus);
+    },
+  );
+
+  it("preserves multiple historical rows for the same task (EC-6)", async () => {
+    const { service, taskRepository, registerUser } = buildService();
+    const rami = registerUser({ name: "Rami", username: "rami" });
+    const daniel = registerUser({ name: "Daniel", username: "daniel" });
+    const sarah = registerUser({ name: "Sarah", username: "sarah" });
+    const task = await taskRepository.create({
+      title: "Task",
+      description: null,
+      priority: "MEDIUM",
+      category: null,
+      scheduledAt: null,
+      deadline: null,
+      creatorId: rami.id,
+      assigneeId: rami.id,
+    });
+    const toDaniel = await service.createAssignment(rami.id, task.id, { toUserId: daniel.id });
+    await service.declineAssignment(daniel.id, toDaniel.id);
+    const toSarah = await service.createAssignment(rami.id, task.id, { toUserId: sarah.id });
+    await service.acceptAssignment(sarah.id, toSarah.id, { scheduledAt: null });
+
+    const sent = await service.getSentAssignments(rami.id);
+
+    expect(sent.data).toHaveLength(2);
+    expect(sent.data.map((row) => row.id).sort()).toEqual([toDaniel.id, toSarah.id].sort());
+  });
+
+  it("orders results newest-first", async () => {
+    const { service, taskRepository, registerUser } = buildService();
+    const rami = registerUser({ name: "Rami", username: "rami" });
+    const daniel = registerUser({ name: "Daniel", username: "daniel" });
+    const taskA = await taskRepository.create({
+      title: "First",
+      description: null,
+      priority: "MEDIUM",
+      category: null,
+      scheduledAt: null,
+      deadline: null,
+      creatorId: rami.id,
+      assigneeId: rami.id,
+    });
+    const first = await service.createAssignment(rami.id, taskA.id, { toUserId: daniel.id });
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const taskB = await taskRepository.create({
+      title: "Second",
+      description: null,
+      priority: "MEDIUM",
+      category: null,
+      scheduledAt: null,
+      deadline: null,
+      creatorId: rami.id,
+      assigneeId: rami.id,
+    });
+    const second = await service.createAssignment(rami.id, taskB.id, { toUserId: daniel.id });
+
+    const sent = await service.getSentAssignments(rami.id);
+
+    expect(sent.data.map((row) => row.id)).toEqual([second.id, first.id]);
+  });
+
+  it("never includes recipient email or the recipient's scheduledAt", async () => {
+    const { service, taskRepository, registerUser } = buildService();
+    const rami = registerUser({ name: "Rami", username: "rami" });
+    const daniel = registerUser({ name: "Daniel", username: "daniel" });
+    const task = await taskRepository.create({
+      title: "Task",
+      description: null,
+      priority: "MEDIUM",
+      category: null,
+      scheduledAt: null,
+      deadline: null,
+      creatorId: rami.id,
+      assigneeId: rami.id,
+    });
+    const created = await service.createAssignment(rami.id, task.id, { toUserId: daniel.id });
+    await service.acceptAssignment(daniel.id, created.id, {
+      scheduledAt: "2026-09-26T14:00:00.000Z",
+    });
+
+    const sent = await service.getSentAssignments(rami.id);
+
+    expect(sent.data[0]!.toUser).not.toHaveProperty("email");
+    expect(Object.keys(sent.data[0]!.toUser)).toEqual(["id", "name", "username"]);
+    expect(sent.data[0]!.task).not.toHaveProperty("scheduledAt");
+    expect(Object.keys(sent.data[0]!.task)).toEqual([
+      "id",
+      "title",
+      "description",
+      "priority",
+      "category",
+      "deadline",
+      "status",
+    ]);
+  });
+});
