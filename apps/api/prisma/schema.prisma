@@ -5,6 +5,10 @@
 // (see prisma/backfillUsernames.ts), then made required, across three
 // migrations so existing rows were never at risk (docs/DATABASE.md §Migration
 // Strategy has the full sequence).
+// M8 adds TaskAssignment (create + cancel only — accept/decline are M9).
+// Creating a PENDING assignment never changes Task.assigneeId; only an M9
+// ACCEPTED transition will. See docs/DATABASE.md §3/§6 for the full
+// creator/assignee/assignment invariant.
 
 generator client {
   provider = "prisma-client-js"
@@ -28,9 +32,11 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  refreshTokens RefreshToken[]
-  tasksCreated  Task[]         @relation("TaskCreator")
-  tasksAssigned Task[]         @relation("TaskAssignee")
+  refreshTokens       RefreshToken[]
+  tasksCreated        Task[]           @relation("TaskCreator")
+  tasksAssigned       Task[]           @relation("TaskAssignee")
+  assignmentsSent     TaskAssignment[] @relation("AssignmentFrom")
+  assignmentsReceived TaskAssignment[] @relation("AssignmentTo")
 
   @@index([name])
 }
@@ -76,6 +82,8 @@ model Task {
   // whenever it transitions away from DONE.
   completedAt DateTime?
 
+  assignments TaskAssignment[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -84,6 +92,56 @@ model Task {
   @@index([assigneeId, deadline])
   @@index([assigneeId, category])
   @@index([creatorId])
+}
+
+enum AssignmentStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+// M8: a proposal to transfer assignee-ship, with its own lifecycle,
+// independent of Task.status. Creating one does NOT touch Task.assigneeId —
+// only an ACCEPTED transition would (M9). CANCELLED/DECLINED/ACCEPTED rows
+// are kept as history, never deleted or overwritten (EC-6).
+//
+// "At most one PENDING assignment per task" (FR-21) is enforced by a
+// partial unique index added by hand in this model's migration SQL —
+// `CREATE UNIQUE INDEX ... ON "TaskAssignment"("taskId") WHERE status =
+// 'PENDING'` — since Prisma's schema DSL has no syntax for partial/filtered
+// unique indexes (still true as of Prisma 5). This updates DATABASE.md's
+// original note that the rule is "enforced in the service layer... not as a
+// structural constraint": M8 adds the structural constraint as the actual
+// concurrency guarantee (a service-layer pre-check still runs first, purely
+// for a fast/friendly error message) — see the M8 report for the full
+// rationale. taskId itself is intentionally NOT unique on its own, since a
+// task legitimately accumulates many non-pending assignment rows over time.
+model TaskAssignment {
+  id      String           @id @default(cuid())
+  status  AssignmentStatus @default(PENDING)
+  message String?
+
+  // onDelete: Cascade — deleting a task removes its (by then all
+  // non-PENDING, per FR-13/EC-5) assignment history with it, per EC-7.
+  // Deletion itself is blocked outright while a PENDING row exists (see
+  // taskRepository.deleteIfNotPending), so this cascade only ever fires
+  // against CANCELLED/DECLINED/ACCEPTED history rows.
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  fromUserId String
+  fromUser   User   @relation("AssignmentFrom", fields: [fromUserId], references: [id])
+
+  toUserId String
+  toUser   User   @relation("AssignmentTo", fields: [toUserId], references: [id])
+
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
+
+  @@index([taskId, status])
+  @@index([toUserId, status])
+  @@index([fromUserId, status])
 }
 
 model RefreshToken {

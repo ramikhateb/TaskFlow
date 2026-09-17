@@ -18,9 +18,10 @@ export function priorityLabel(priority: TaskPriority): string {
 interface PrioritySelectorProps {
   value: TaskPriority;
   onChange: (value: TaskPriority) => void;
+  disabled?: boolean;
 }
 
-export function PrioritySelector({ value, onChange }: PrioritySelectorProps) {
+export function PrioritySelector({ value, onChange, disabled = false }: PrioritySelectorProps) {
   return (
     <View style={styles.container}>
       <Text style={styles.label}>Priority</Text>
@@ -31,11 +32,13 @@ export function PrioritySelector({ value, onChange }: PrioritySelectorProps) {
             <TouchableOpacity
               key={priority}
               accessibilityRole="button"
-              accessibilityState={{ selected }}
+              accessibilityState={{ selected, disabled }}
+              disabled={disabled}
               style={[
                 styles.option,
                 { borderColor: PRIORITY_COLORS[priority] },
                 selected && { backgroundColor: PRIORITY_COLORS[priority] },
+                disabled && styles.optionDisabled,
               ]}
               onPress={() => onChange(priority)}
             >
@@ -63,4 +66,5 @@ const styles = StyleSheet.create({
   },
   optionText: { fontSize: 13, fontWeight: "600" },
   optionTextSelected: { color: "#fff" },
+  optionDisabled: { opacity: 0.5 },
 });

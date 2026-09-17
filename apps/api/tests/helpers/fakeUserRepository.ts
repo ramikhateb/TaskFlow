@@ -23,13 +23,16 @@ export function createFakeUserRepository() {
     return user;
   }
 
-  const userRepository: UserRepository = {
+  const userRepository: UserRepository & { findById(id: string): Promise<User | null> } = {
     async search(query, excludeUserId) {
       return users.filter(
         (u) =>
           u.id !== excludeUserId &&
           (u.username.toLowerCase().includes(query) || u.name.toLowerCase().includes(query)),
       );
+    },
+    async findById(id) {
+      return users.find((u) => u.id === id) ?? null;
     },
   };
 

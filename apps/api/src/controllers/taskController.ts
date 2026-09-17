@@ -33,8 +33,8 @@ export function createTaskController(taskService: TaskService) {
 
   const getOne = asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params as unknown as TaskIdParam;
-    const task = await taskService.getTask(requireUserId(req), id);
-    res.status(200).json(task);
+    const detail = await taskService.getTaskDetail(requireUserId(req), id);
+    res.status(200).json(detail);
   });
 
   const update = asyncHandler(async (req: Request, res: Response) => {

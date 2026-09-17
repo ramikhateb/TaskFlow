@@ -1,21 +1,76 @@
-import type { Task } from "@prisma/client";
+import type { Task, User } from "@prisma/client";
 import { listTasksQuerySchema } from "@taskflow/shared";
 import { ConflictError, NotFoundError } from "../../src/errors";
+import type { TaskAssignmentWithUsers } from "../../src/repositories/taskAssignmentRepository";
 import {
   classifyForToday,
   createTaskService,
   isScheduleValid,
   isValidStatusTransition,
+  type PendingAssignmentRepository,
 } from "../../src/services/taskService";
 import { createFakeTaskRepository } from "../helpers/fakeTaskRepository";
 
 const USER_A = "user-a";
 const USER_B = "user-b";
 
+function makeFakeUser(overrides: Partial<User> = {}): User {
+  return {
+    id: "user-x",
+    email: "x@example.com",
+    passwordHash: "hash",
+    name: "X",
+    username: "userx",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
+}
+
+// A minimal, directly-settable pending assignment, for the FR-13/EC-5
+// freeze tests below — deliberately not built via assignmentService (which
+// taskService never depends on).
+function makePendingAssignment(taskId: string): TaskAssignmentWithUsers {
+  return {
+    id: "assignment-1",
+    status: "PENDING",
+    message: null,
+    taskId,
+    fromUserId: USER_A,
+    toUserId: "recipient-1",
+    createdAt: new Date(),
+    respondedAt: null,
+    fromUser: makeFakeUser({ id: USER_A, name: "User A", username: "usera" }),
+    toUser: makeFakeUser({ id: "recipient-1", name: "Recipient", username: "recipient" }),
+  };
+}
+
+/**
+ * `setPendingAssignment` drives a fake PendingAssignmentRepository — the
+ * same narrow, repository-level dependency taskService uses in production
+ * (see taskService.ts) — so these unit tests can simulate "a PENDING
+ * assignment exists for this task" without going through assignmentService
+ * at all, matching the real dependency graph (taskService never imports
+ * assignmentService — see the M8 follow-up report).
+ */
 function buildService() {
-  const { tasks, taskRepository } = createFakeTaskRepository();
-  const service = createTaskService({ taskRepository });
-  return { service, tasks, taskRepository };
+  const { tasks, taskRepository, pendingTaskIds } = createFakeTaskRepository();
+  let pendingAssignment: TaskAssignmentWithUsers | null = null;
+  const assignmentRepository: PendingAssignmentRepository = {
+    async findPendingByTaskId(taskId) {
+      return pendingAssignment && pendingAssignment.taskId === taskId ? pendingAssignment : null;
+    },
+  };
+  const service = createTaskService({ taskRepository, assignmentRepository });
+  return {
+    service,
+    tasks,
+    taskRepository,
+    pendingTaskIds,
+    setPendingAssignment: (assignment: TaskAssignmentWithUsers | null) => {
+      pendingAssignment = assignment;
+    },
+  };
 }
 
 let taskCounter = 0;
@@ -751,5 +806,164 @@ describe("taskService.getSchedule", () => {
     const result = await service.getSchedule(USER_A, { from, to });
 
     expect(result).toEqual([]);
+  });
+});
+
+describe("taskService.getTaskDetail (M8)", () => {
+  it("returns pendingAssignment: null when there is none", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+
+    const detail = await service.getTaskDetail(USER_A, created.id);
+
+    expect(detail.pendingAssignment).toBeNull();
+    expect(detail.title).toBe("Task");
+  });
+
+  it("returns the mapped pendingAssignment (PublicUser shape, no email) when one exists", async () => {
+    const { service, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+
+    const detail = await service.getTaskDetail(USER_A, created.id);
+
+    expect(detail.pendingAssignment).toMatchObject({
+      id: "assignment-1",
+      status: "PENDING",
+      fromUser: { id: USER_A, name: "User A", username: "usera" },
+      toUser: { id: "recipient-1", name: "Recipient", username: "recipient" },
+    });
+    expect(detail.pendingAssignment).not.toHaveProperty("fromUser.email");
+    expect(detail.pendingAssignment).not.toHaveProperty("toUser.email");
+  });
+
+  it("throws NotFoundError for a task the caller doesn't own (same as getTask)", async () => {
+    const { service } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+
+    await expect(service.getTaskDetail(USER_B, created.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// FR-13/EC-5 (M8 follow-up): while a task has a PENDING assignment, the
+// current assignee still owns it and read access is untouched (see
+// getTaskDetail/getTask/listOwnTasks/getToday/getSchedule above — none of
+// them consult assignmentRepository for anything other than building the
+// pendingAssignment field), but every mutation is frozen until the
+// assignment is resolved (cancelled, in M8 — accept/decline are M9).
+describe("taskService — pending assignment freeze (FR-13/EC-5)", () => {
+  it("blocks a field edit (PATCH) while a pending assignment exists", async () => {
+    const { service, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+
+    await expect(
+      service.updateTask(USER_A, created.id, { title: "Edited" }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("blocks a status change / completion while a pending assignment exists", async () => {
+    const { service, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+
+    await expect(service.updateTask(USER_A, created.id, { status: "DONE" })).rejects.toBeInstanceOf(
+      ConflictError,
+    );
+  });
+
+  it("blocks delete while a pending assignment exists", async () => {
+    const { service, tasks, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+
+    await expect(service.deleteTask(USER_A, created.id)).rejects.toBeInstanceOf(ConflictError);
+    expect(tasks).toHaveLength(1);
+  });
+
+  it("does not change assigneeId when a mutation is blocked", async () => {
+    const { service, tasks, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+
+    await expect(
+      service.updateTask(USER_A, created.id, { title: "Edited" }),
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(tasks[0]!.assigneeId).toBe(USER_A);
+  });
+
+  it("allows a field edit again once the pending assignment is cleared (cancelled)", async () => {
+    const { service, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+    await expect(
+      service.updateTask(USER_A, created.id, { title: "Edited" }),
+    ).rejects.toBeInstanceOf(ConflictError);
+
+    setPendingAssignment(null); // simulates the assignment being cancelled
+
+    const result = await service.updateTask(USER_A, created.id, { title: "Edited" });
+    expect(result.title).toBe("Edited");
+    expect(result.assigneeId).toBe(USER_A);
+  });
+
+  it("allows a status change/completion again once cleared", async () => {
+    const { service, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+    await expect(service.updateTask(USER_A, created.id, { status: "DONE" })).rejects.toBeInstanceOf(
+      ConflictError,
+    );
+
+    setPendingAssignment(null);
+
+    const result = await service.updateTask(USER_A, created.id, { status: "DONE" });
+    expect(result.status).toBe("DONE");
+  });
+
+  it("allows delete again once cleared", async () => {
+    const { service, tasks, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+    await expect(service.deleteTask(USER_A, created.id)).rejects.toBeInstanceOf(ConflictError);
+
+    setPendingAssignment(null);
+
+    await service.deleteTask(USER_A, created.id);
+    expect(tasks).toHaveLength(0);
+  });
+
+  it("read operations (getTask, getTaskDetail, listOwnTasks) still work while pending", async () => {
+    const { service, setPendingAssignment } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    setPendingAssignment(makePendingAssignment(created.id));
+
+    await expect(service.getTask(USER_A, created.id)).resolves.toMatchObject({ title: "Task" });
+    await expect(service.getTaskDetail(USER_A, created.id)).resolves.toMatchObject({
+      title: "Task",
+      pendingAssignment: { status: "PENDING" },
+    });
+    await expect(service.listOwnTasks(USER_A)).resolves.toMatchObject([{ title: "Task" }]);
+  });
+
+  it("defense in depth: the repository's own atomic guard blocks the write even if the service pre-check is bypassed", async () => {
+    // Simulates the real database's guarantee (a partial/relational
+    // condition baked into the UPDATE/DELETE statement itself, per
+    // taskRepository.updateIfNotPending/deleteIfNotPending) mattering
+    // independently of the service-layer pre-check — the property FR-13/
+    // EC-5 explicitly asked not to rely on a service-level check alone for.
+    // Here the fake PendingAssignmentRepository reports nothing pending
+    // (so assertNotPending's pre-check would pass), but pendingTaskIds —
+    // standing in for the database's own view — still marks the task
+    // pending, so the atomic layer must be what actually blocks it.
+    const { service, tasks, pendingTaskIds } = buildService();
+    const created = await service.createTask(USER_A, { title: "Task" });
+    pendingTaskIds.add(created.id);
+
+    await expect(
+      service.updateTask(USER_A, created.id, { title: "Edited" }),
+    ).rejects.toBeInstanceOf(ConflictError);
+    await expect(service.deleteTask(USER_A, created.id)).rejects.toBeInstanceOf(ConflictError);
+    expect(tasks[0]!.title).toBe("Task");
   });
 });

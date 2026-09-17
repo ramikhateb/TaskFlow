@@ -24,7 +24,7 @@ Deferred: password reset, email verification, OAuth/social login, multi-device s
 - FR-10 The assignee of a task can update any of its fields.
 - FR-11 The assignee of a task can mark it complete (status → `DONE`) or delete it.
 - FR-12 Status transitions are restricted to: `TODO ⇄ IN_PROGRESS ⇄ DONE`, and any of `TODO`/`IN_PROGRESS`/`DONE` → `CANCELLED`. `CANCELLED` is terminal.
-- FR-13 A task with a `PENDING` assignment (see §1.4) cannot be edited, completed, or deleted by anyone until that assignment is resolved (accepted/declined/cancelled).
+- FR-13 A task with a `PENDING` assignment (see §1.4) cannot be edited, completed, or deleted by anyone until that assignment is resolved (accepted/declined/cancelled) — enforced server-side in `TaskService.updateTask`/`deleteTask` (M8). `assigneeId`, read access, and visibility in Tasks/Today/Schedule are all unaffected by the freeze — only mutations are blocked. Once the assignment is `CANCELLED`, mutations are available again; M9 defines the `DECLINED` (also restores control to the current assignee) and `ACCEPTED` (transfers control to the recipient) cases.
 
 ### 1.3 Today View, Schedule View, Search & Filter
 
@@ -69,7 +69,7 @@ Deferred: password reset, email verification, OAuth/social login, multi-device s
 |---|---|
 | Read a task | Current assignee, or the creator (read-only if not also the assignee) |
 | Create a task | Any authenticated user (for themselves) |
-| Update / complete / delete a task | Current assignee only, and only when the task has no `PENDING` assignment |
+| Update / complete / delete a task | Current assignee only, and only when the task has no `PENDING` assignment (FR-13/EC-5) |
 | Create an assignment on a task | Current assignee only, and only if no `PENDING` assignment exists on it already |
 | Cancel an assignment | The sender (`fromUserId`), only while `PENDING` |
 | Accept / decline an assignment | The recipient (`toUserId`), only while `PENDING` |
@@ -84,7 +84,7 @@ All checks are enforced server-side in the service layer (see [ARCHITECTURE.md](
 - **EC-2 Assigning to a nonexistent user.** Rejected as a validation/not-found error before any state changes.
 - **EC-3 Double response.** Accepting or declining an assignment that is no longer `PENDING` (already resolved, or resolved concurrently) returns a conflict error; the second of two racing requests must not apply.
 - **EC-4 Second assignment while one is pending.** Attempting to create a new assignment on a task that already has a `PENDING` assignment is rejected (FR-21).
-- **EC-5 Edits during a pending assignment.** Any edit/delete/complete attempt on a task with a `PENDING` assignment is rejected (FR-13), even though `assigneeId` still points at a valid, current assignee — the task is deliberately frozen while a transfer decision is outstanding, so the state the recipient is evaluating can't shift out from under them, and so acceptance always hands off a stable task. The only valid actions on it are cancel/accept/decline.
+- **EC-5 Edits during a pending assignment.** Any edit/delete/complete attempt on a task with a `PENDING` assignment is rejected with a `ConflictError` (FR-13), even though `assigneeId` still points at a valid, current assignee — the task is deliberately frozen while a transfer decision is outstanding, so the state the recipient is evaluating can't shift out from under them, and so acceptance always hands off a stable task. The only valid actions on it while `PENDING` are read, cancel (sender), and — from M9 — accept/decline (recipient). Enforced as an atomic conditional database write (DATABASE.md §6), not a check-then-act service call, for the same reason FR-21's one-PENDING-per-task rule is a database constraint rather than a service-only check — see DATABASE.md §8 for the concurrency analysis.
 - **EC-6 Reassignment after decline/cancel.** Once an assignment is `DECLINED` or `CANCELLED`, the (unchanged) assignee can create a new assignment — to the same or a different user — producing a new `TaskAssignment` row; history of prior attempts is preserved, not overwritten.
 - **EC-7 Deleting a task with assignment history.** Deleting a task is only possible when it has no `PENDING` assignment (FR-13), and removes/cascades its historical assignment rows.
 - **EC-8 Timezone boundaries.** "Today" and date-range filters use client-supplied UTC boundaries (FR-17), so a task at 11:30pm local time is correctly included/excluded even though the server has no notion of the user's timezone.

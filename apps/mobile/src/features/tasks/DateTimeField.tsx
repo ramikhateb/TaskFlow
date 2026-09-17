@@ -6,6 +6,7 @@ interface DateTimeFieldProps {
   label: string;
   value: Date | null;
   onChange: (value: Date | null) => void;
+  disabled?: boolean;
 }
 
 /**
@@ -17,7 +18,7 @@ interface DateTimeFieldProps {
  * one combined picker; Android does a two-step date-then-time flow, merging
  * the results into one Date. Confirmed compatible with Expo Go on SDK 57.
  */
-export function DateTimeField({ label, value, onChange }: DateTimeFieldProps) {
+export function DateTimeField({ label, value, onChange, disabled = false }: DateTimeFieldProps) {
   const [activeMode, setActiveMode] = useState<"date" | "time" | null>(null);
   const [pendingDate, setPendingDate] = useState<Date | null>(null);
 
@@ -53,9 +54,11 @@ export function DateTimeField({ label, value, onChange }: DateTimeFieldProps) {
       <Text style={styles.label}>{label}</Text>
       <View style={styles.row}>
         <TouchableOpacity
-          style={styles.valueButton}
+          style={[styles.valueButton, disabled && styles.valueButtonDisabled]}
           accessibilityRole="button"
           accessibilityLabel={`Set ${label}`}
+          accessibilityState={{ disabled }}
+          disabled={disabled}
           onPress={() => setActiveMode("date")}
         >
           <Text style={styles.valueText}>{value ? formatDateTime(value) : "Not set"}</Text>
@@ -64,6 +67,8 @@ export function DateTimeField({ label, value, onChange }: DateTimeFieldProps) {
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel={`Clear ${label}`}
+            accessibilityState={{ disabled }}
+            disabled={disabled}
             onPress={() => onChange(null)}
           >
             <Text style={styles.clearText}>Clear</Text>
@@ -103,6 +108,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
   },
+  valueButtonDisabled: { opacity: 0.5 },
   valueText: { fontSize: 16 },
   clearText: { color: "#c0392b", fontWeight: "600" },
 });

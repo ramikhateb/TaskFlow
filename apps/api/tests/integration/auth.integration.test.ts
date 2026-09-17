@@ -11,6 +11,13 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  // Full cleanup, not just the tables this file's own tests touch: multiple
+  // integration test files share one test database, and Jest's file
+  // execution order isn't guaranteed alphabetical/stable — a file that runs
+  // first and leaves Task/TaskAssignment rows behind would otherwise break
+  // this file's very first beforeEach via a FK constraint on User.
+  await prisma.taskAssignment.deleteMany();
+  await prisma.task.deleteMany();
   await prisma.refreshToken.deleteMany();
   await prisma.user.deleteMany();
 });

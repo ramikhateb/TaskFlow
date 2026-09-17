@@ -1,10 +1,12 @@
 import {
+  taskDetailResponseSchema,
   taskListResponseSchema,
   taskResponseSchema,
   todayResponseSchema,
   type CreateTaskRequest,
   type DateRangeQuery,
   type ListTasksQuery,
+  type TaskDetailResponse,
   type TaskListResponse,
   type TaskResponse,
   type TodayResponse,
@@ -24,9 +26,11 @@ export async function listTasksRequest(filters: ListTasksQuery = {}): Promise<Ta
   return taskListResponseSchema.parse(data);
 }
 
-export async function getTaskRequest(id: string): Promise<TaskResponse> {
+// GET /tasks/:id only: additively includes the task's current pending
+// assignment, if any (M8) — see packages/shared/src/schemas/assignment.ts.
+export async function getTaskRequest(id: string): Promise<TaskDetailResponse> {
   const data = await apiFetch<unknown>(`/tasks/${id}`, { auth: true });
-  return taskResponseSchema.parse(data);
+  return taskDetailResponseSchema.parse(data);
 }
 
 export async function createTaskRequest(input: CreateTaskRequest): Promise<TaskResponse> {

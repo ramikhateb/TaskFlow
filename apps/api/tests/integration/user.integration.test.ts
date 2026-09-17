@@ -11,6 +11,10 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  // Full cleanup, not just the tables this file's own tests touch — see the
+  // identical comment in auth.integration.test.ts.
+  await prisma.taskAssignment.deleteMany();
+  await prisma.task.deleteMany();
   await prisma.refreshToken.deleteMany();
   await prisma.user.deleteMany();
 });

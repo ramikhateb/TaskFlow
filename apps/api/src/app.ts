@@ -3,6 +3,7 @@ import express, { type Express } from "express";
 import { SHARED_PACKAGE_ID } from "@taskflow/shared";
 import type { Env } from "./env";
 import { errorHandler } from "./middleware/errorHandler";
+import { createAssignmentRoutes } from "./routes/assignmentRoutes";
 import { createAuthRoutes } from "./routes/authRoutes";
 import { createTaskRoutes } from "./routes/taskRoutes";
 import { createUserRoutes } from "./routes/userRoutes";
@@ -23,6 +24,9 @@ export function createApp(env: Env): Express {
 
   app.use("/auth", createAuthRoutes(env));
   app.use("/tasks", createTaskRoutes(env));
+  // Different path depth ("/:taskId/assignments...") than taskRoutes'
+  // "/:id" — no route-matching ambiguity between the two routers.
+  app.use("/tasks", createAssignmentRoutes(env));
   app.use("/users", createUserRoutes(env));
 
   // Must be registered after all routes.

@@ -28,7 +28,9 @@ For a self-created task these are always equal. Every authorization rule in REQU
 
 ### Why assignment history isn't collapsed into the `Task` row
 
-A task can be assigned, declined, and reassigned to someone else later (EC-6). Modeling each attempt as its own `TaskAssignment` row — rather than a couple of nullable columns on `Task` — keeps a full, queryable history and avoids overloading `Task` with fields that only make sense mid-assignment. `TaskAssignment.taskId` is intentionally **not unique**; the business rule "at most one `PENDING` assignment per task" (FR-21) is enforced in the service layer within a transaction, not as a structural constraint, because the table legitimately holds many non-pending rows per task over time.
+A task can be assigned, declined, and reassigned to someone else later (EC-6). Modeling each attempt as its own `TaskAssignment` row — rather than a couple of nullable columns on `Task` — keeps a full, queryable history and avoids overloading `Task` with fields that only make sense mid-assignment. `TaskAssignment.taskId` is intentionally **not unique** on its own, because the table legitimately holds many non-pending rows per task over time (CANCELLED/DECLINED/ACCEPTED history is kept, never deleted or overwritten).
+
+**(M8 update)** The business rule "at most one `PENDING` assignment per task" (FR-21) **is** enforced as a structural database constraint, not only in the service layer — see "Enforcing at-most-one-PENDING-per-task" in §8 below for the mechanism and why a plain service-layer check-then-insert was rejected as unsafe under concurrency.
 
 ### Why category is a plain string, not a table, in v1
 
@@ -116,7 +118,7 @@ model TaskAssignment {
   message String?
 
   taskId String
-  task   Task   @relation(fields: [taskId], references: [id])
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   fromUserId String
   fromUser   User   @relation("AssignmentFrom", fields: [fromUserId], references: [id])
@@ -152,6 +154,7 @@ Notes:
 - `RefreshToken.familyId` groups all tokens descended from one login, so reuse of a rotated-out token (EC-9) can revoke the entire family in one query rather than tracking a linked list of predecessors.
 - `RefreshToken` stores a hash of the token value, never the raw value.
 - `Task.category` and `Task.priority` are denormalized/enum choices deliberately, per §3 above and §7 below.
+- `TaskAssignment.task`'s `onDelete: Cascade` (M8) implements EC-7: deleting a task removes its assignment history with it. This is safe specifically because deletion itself is blocked outright while a `PENDING` row exists (FR-13/EC-5, §6) — every `TaskAssignment` row still attached to a task at the moment it's actually deleted is therefore pure history (`CANCELLED`, or a future `ACCEPTED`/`DECLINED`), never a row anyone still needs to act on.
 
 ## 5. Indexing Rationale
 
@@ -164,7 +167,8 @@ Notes:
 | `Task(creatorId)` | Creator's read-only view of tasks they authored but don't hold |
 | `TaskAssignment(toUserId, status)` | Inbox (FR-28) |
 | `TaskAssignment(fromUserId, status)` | Sent-assignments list (FR-29) |
-| `TaskAssignment(taskId, status)` | Enforcing "no other pending assignment on this task" (FR-21) |
+| `TaskAssignment(taskId, status)` | Fast lookup of a task's current `PENDING` assignment (read path, e.g. `GET /tasks/:id`'s `pendingAssignment` field) |
+| `TaskAssignment_one_pending_per_task` (partial unique on `taskId` `WHERE status = 'PENDING'`) | The actual structural enforcement of "no other pending assignment on this task" (FR-21) — see §8 |
 | `User(name)` | User search (FR-18) — display-name substring match |
 | `User(username)` (from `@unique`) | Exact-match lookups (registration uniqueness checks); also partially serves username search — see caveat below |
 
@@ -196,6 +200,20 @@ Enforced in the `TaskService`, not the database — a `CHECK` constraint was con
 ```
 
 `ACCEPTED`, `DECLINED`, `CANCELLED` are terminal for that row; a later assignment is a new row (EC-6). Only the `accept` transition ever writes `Task.assigneeId` — creating, declining, and cancelling are pure `TaskAssignment` state changes.
+
+**Implementation status:** M8 implements `create` and `cancel` only (`PENDING`/`CANCELLED`), plus FR-13/EC-5's mutation freeze (below). `accept`/`decline` and the resulting `Task.assigneeId` write are M9.
+
+### What each assignment state means for the task (FR-13/EC-5)
+
+| Assignment state | `assigneeId` | Who's responsible | Read / list visibility | Task mutations |
+|---|---|---|---|---|
+| No assignment / none `PENDING` | unchanged | current assignee | normal | allowed |
+| `PENDING` | **unchanged** | current assignee (unchanged) | normal — task still appears in Tasks/Today/Schedule exactly as before | **frozen**: edit, status change (including complete), cancel-the-task, and delete are all rejected with `ConflictError` (409). The sender may still cancel the *assignment* — that's the one action available that isn't a plain read. |
+| `CANCELLED` | unchanged | current assignee (unchanged) | normal | allowed again, immediately |
+| `DECLINED` *(M9)* | unchanged | current assignee (unchanged) — decline restores full normal control, same as cancel | normal | allowed again, immediately |
+| `ACCEPTED` *(M9)* | **changes to the recipient**, atomically with the transition | recipient | normal, now from the recipient's perspective | allowed again, for the new assignee |
+
+The freeze is enforced in `TaskService.updateTask`/`deleteTask`, which only ever call `TaskRepository.updateIfNotPending`/`deleteIfNotPending` — see §8's "Enforcing the pending-assignment mutation freeze" for the concurrency mechanism, which mirrors FR-21's own database-level guarantee rather than relying on a service-level check alone.
 
 ### Transactional boundaries
 
@@ -234,3 +252,43 @@ None of these are built in v1. They're listed to show the current design doesn't
 3. **Require.** `username String` (drop the `?`) — migration `require_username`. By this point every row already satisfies `NOT NULL` and the unique constraint, so this migration is a no-op risk-wise; it only formalizes what's already true.
 
 This pattern generalizes beyond usernames: nullable-add → backfill script → make-required, always as separate migrations, never one migration that assumes existing rows already comply.
+
+### Enforcing "at most one PENDING assignment per task" as a database constraint (M8)
+
+FR-21 requires that creating a `TaskAssignment` fail if the task already has one `PENDING`. A service-layer "check, then insert if nothing found" is **not** safe under concurrency: two requests can both pass the check before either has inserted, and both then insert — Postgres has no way to know they were supposed to be mutually exclusive unless a constraint says so.
+
+Prisma's `schema.prisma` DSL has no syntax for a **partial/filtered unique index** (unique only where a `WHERE` clause holds) — still true as of Prisma 5.22.0, the version used here — so this constraint is added by hand in the migration's raw SQL, alongside the Prisma-generated statements:
+
+```sql
+CREATE UNIQUE INDEX "TaskAssignment_one_pending_per_task"
+  ON "TaskAssignment" ("taskId")
+  WHERE "status" = 'PENDING';
+```
+
+This is a real Postgres constraint: it allows unlimited non-`PENDING` rows per `taskId` (preserving history, per EC-6) while guaranteeing at most one `PENDING` row, enforced atomically by the database itself regardless of how many requests race. A second concurrent insert doesn't wait and silently fail — it's rejected outright by the index with error code `P2002`, which the repository catches and translates into a domain `DuplicatePendingAssignmentError` → `ConflictError` (409).
+
+The service layer still runs its own `findPendingByTaskId` pre-check before attempting the insert — not as the safety guarantee (the index is), but so the common, non-racing case gets a clean error without relying on catching a database exception, and so the error message can be specific without probing Postgres error internals in the hot path. Verified empirically: firing 5 concurrent `POST /tasks/:taskId/assignments` requests at the same task yields exactly one `201` and four `409`s, with exactly one `PENDING` row in the database afterward.
+
+Because `schema.prisma` cannot express this index, it is **not** reflected in the `model TaskAssignment { ... }` block in §4 above — same limitation as any Prisma-DSL-only view of the schema. Anyone regenerating migrations from the Prisma schema alone (e.g. `prisma migrate diff --from-empty`) would need to re-add this index by hand; it is not something `prisma db pull`/introspection would reconstruct from the DSL either, though it *would* show up in `prisma db pull` against the live database, since it's a real index Postgres knows about.
+
+### Enforcing the pending-assignment mutation freeze (FR-13/EC-5, M8)
+
+The same "don't rely on a service-level check alone" principle applies to FR-13/EC-5: blocking task mutations while a `PENDING` assignment exists is enforced as an **atomic conditional write**, not a check-then-act service call.
+
+`TaskRepository.updateIfNotPending`/`deleteIfNotPending` use Prisma's relational `none` filter, which compiles the "no pending assignment" condition directly into the `UPDATE`/`DELETE` statement's own `WHERE` clause (a `NOT EXISTS` subquery against `TaskAssignment`), e.g. conceptually:
+
+```sql
+UPDATE "Task" SET ...
+WHERE id = $1
+  AND NOT EXISTS (
+    SELECT 1 FROM "TaskAssignment" WHERE "taskId" = $1 AND status = 'PENDING'
+  );
+```
+
+"Is there a pending assignment" and "apply the edit" happen as one statement — the same compare-and-swap idiom as `cancelIfPending` above, and structurally analogous to FR-21's partial unique index (a real database-level check, not just an application-level one). `TaskService` still runs a `findPendingByTaskId` pre-check first, purely for a clean, immediate `ConflictError` in the non-racing case — exactly mirroring how the create-assignment pre-check relates to its own database guarantee.
+
+**Concurrency guarantee, precisely stated:** this closes the check-then-act race for any two operations whose executions don't overlap within the same in-flight database statement — in practice, this covers effectively all real concurrent access, since each statement's Postgres snapshot is taken at execution start and the two statements involved (the assignment `INSERT`, the task `UPDATE`/`DELETE`) are each a single round trip with no user-controlled delay in between. What it does **not** close: if a task mutation's `UPDATE` and a concurrent assignment `INSERT` are dispatched by Postgres closely enough that the `UPDATE`'s snapshot is taken microseconds before the `INSERT` commits, the `UPDATE` can still succeed — because the two statements touch different tables and never contend for the same row lock, there's no mechanism forcing them into a serialized order the way two `UPDATE`s on the same `Task` row would be. Fully closing this would require the assignment-creation transaction to also take an explicit `SELECT ... FOR UPDATE` lock on the `Task` row before inserting, forcing a genuine wait/serialization against any concurrent task mutation.
+
+**Why that's not implemented now:** unlike FR-21's race (which is triggerable by two different concurrent requests attempting the same action, and was given the stronger database-constraint treatment for exactly that reason), this residual window requires the *same* principal — only the task's current assignee can create an assignment on it — to fire two conflicting requests within a sub-millisecond window of each other. The realistic trigger is a double-tap or two-tabs-open self-collision, not an adversarial or cross-user scenario, and the outcome of losing the race is a last-write-wins style edge case, not a security or data-integrity breach. Given that, explicit row locking (with its added latency and cross-table deadlock surface between `Task` and `TaskAssignment`) is deferred rather than added speculatively — worth revisiting if usage patterns ever show otherwise, e.g. before a security hardening pass (see ARCHITECTURE.md §6).
+
+Verified empirically two ways: (1) firing 5 concurrent `PATCH` requests against a task with an *already-committed* `PENDING` assignment — fully deterministic, since the assignment's commit strictly precedes all five — and confirming all 5 are rejected with 409; (2) racing a `PATCH` against a concurrent assignment-`POST` on a fresh task and confirming the database ends up in a self-consistent state either way (the task's stored fields match whichever result the `PATCH` actually got, `assigneeId` is unchanged, and exactly one `PENDING` row exists) — this does not, and cannot, distinguish the benign ordering from the theoretical sub-statement race described above, since both look identical in the end state.

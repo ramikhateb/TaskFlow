@@ -23,7 +23,7 @@ taskflow/
 ### Layering
 
 - **Screens (`app/`, Expo Router)** — route-level components (Today, Schedule, Task Detail, Inbox, Search, etc.). Own layout and navigation only; no business logic or direct API calls.
-- **Features (`src/features/<feature>/`)** — feature-scoped hooks, components, and API-call wrappers: `src/features/tasks`, `src/features/assignments`, `src/features/users`. TanStack Query hooks live here (`useTodayTasks`, `useCreateTask`, `useInbox`, `useRespondToAssignment`, `useUserSearch`, etc.).
+- **Features (`src/features/<feature>/`)** — feature-scoped hooks, components, and API-call wrappers: `src/features/tasks`, `src/features/users`. TanStack Query hooks live here (`useTodayTasks`, `useCreateTask`, `useUserSearch`, etc.). **(M8)** Assignment create/cancel hooks (`useCreateAssignment`, `useCancelAssignment`) live in `src/features/tasks/useAssignments.ts` rather than a standalone `src/features/assignments/`, since M8 has no assignment-specific screen yet (no Inbox/sent-list) — the only UI surface is the task detail screen, and the only state involved is a single task's `pendingAssignment` field. A dedicated `src/features/assignments/` folder is expected once M9 adds the Inbox screen and its own list/accept/decline hooks.
 - **API client (`src/api/`)** — a thin typed HTTP client (fetch wrapper) that attaches the auth header, handles the access/refresh token flow, and parses responses against the shared Zod schemas. No React or Query code here.
 - **State**:
   - **Server state** (tasks, assignments, user profile, search results) lives in **TanStack Query** — it owns caching, refetch-on-focus, and invalidation after mutations. This is the primary source of truth for anything that originates from the API.
@@ -54,6 +54,23 @@ Route (Express router)
 - **Controllers** are thin: parse the validated request, call one service method, shape the HTTP response. No business-rule branching here.
 - **Services** hold domain logic — authorization decisions (REQUIREMENTS.md §2), state transitions (DATABASE.md §6), and transaction boundaries. E.g. `AssignmentService.accept(assignmentId, userId, scheduledAt?)` checks `userId` is the recipient, the assignment is `PENDING`, and performs the transactional update.
 - **Repositories** are the only layer that imports the Prisma client, keeping Prisma out of business logic and services unit-testable against a fake repository.
+- **Services never import each other.** When one feature's logic needs data another feature's repository owns, it takes a narrow, repository-level dependency on that repository — never a dependency on the other service. `AssignmentService` depends on `TaskLookupRepository`/`UserLookupRepository` (not `TaskService`); `TaskService` depends on a `PendingAssignmentRepository` (not `AssignmentService`) for exactly the same reason. This keeps the service graph a strict DAG with no risk of a circular import, at the cost of each service doing its own (small, pure) response-shaping — see "Final task-detail dependency structure" below for the concrete example this was built around.
+
+### Final task-detail dependency structure (M8 follow-up)
+
+`GET /tasks/:id` needs both the task's own fields and its current pending assignment (if any). The controller stays thin — `taskService.getTaskDetail(userId, id)` and nothing else — because the orchestration moved into `TaskService` itself:
+
+```
+TaskController.getOne
+  → TaskService.getTaskDetail(userId, taskId)
+      → TaskService.getTask(userId, taskId)      [existing: ownership check + TaskResponse]
+      → PendingAssignmentRepository.findPendingByTaskId(taskId)   [= taskAssignmentRepository, injected]
+      → mappers/assignmentResponse.toAssignmentResponse(...)      [pure, shared function]
+```
+
+`PendingAssignmentRepository` is a one-method interface (`findPendingByTaskId`) that `TaskServiceDeps` requires alongside `TaskRepository`; in `taskRoutes.ts` it's satisfied by the same `taskAssignmentRepository` module `assignmentRoutes.ts` uses for its own, separate `AssignmentService` instance. Both services independently depend on that repository module — neither depends on the other. The `TaskAssignment → TaskAssignmentResponse` mapping (`fromUser`/`toUser` → `PublicUser`, date → ISO string) is a small, dependency-free pure function in `src/mappers/assignmentResponse.ts`, imported by both `TaskService` and `AssignmentService`, so the shape is defined once without either service needing to know the other exists. `AssignmentService` no longer exposes a `getPendingForTask` method — that read now lives entirely in `TaskService`, since it had no other caller once the controller stopped orchestrating.
+
+The same `PendingAssignmentRepository` dependency also backs FR-13/EC-5's mutation freeze: `TaskService.updateTask`/`deleteTask` use it for a pre-check before calling `TaskRepository.updateIfNotPending`/`deleteIfNotPending` (see DATABASE.md §8 for the atomic-write mechanism those two repository methods use).
 
 ### API Boundaries
 
@@ -75,26 +92,30 @@ Resource-oriented REST, grouped by domain. Every route except `/auth/register` a
 | `GET /tasks/today` | Today view (FR-14) — server computes the union, given client day boundaries |
 | `GET /tasks/schedule` | Schedule view (FR-15); query: `from`, `to` (UTC instants) |
 | `POST /tasks` | Create a task (creator = assignee) |
-| `GET /tasks/:id` | Task detail (assignee or creator only) |
-| `PATCH /tasks/:id` | Update fields, including `status` (assignee only, no pending assignment) |
-| `DELETE /tasks/:id` | Delete (assignee only, no pending assignment) |
+| `GET /tasks/:id` | Task detail (assignee or creator only); additively includes `pendingAssignment` (M8, see below) |
+| `PATCH /tasks/:id` | Update fields, including `status` (assignee only; rejected with 409 while a `PENDING` assignment exists — FR-13/EC-5, enforced M8) |
+| `DELETE /tasks/:id` | Delete (assignee only; rejected with 409 while a `PENDING` assignment exists — FR-13/EC-5, enforced M8) |
 
 **Users**
 | Method & Path | Purpose |
 |---|---|
 | `GET /users/search` | Search by username or display-name substring — **never email**; query: `q` (2-50 chars after normalization). Authenticated only; excludes the caller; results capped at 20 (FR-18/FR-19a) |
 
-**Assignments**
-| Method & Path | Purpose |
-|---|---|
-| `POST /assignments` | Create (`taskId`, `toUserId`, optional `message`) |
-| `GET /assignments/inbox` | Assignments received; query: `status` (default `PENDING`) |
-| `GET /assignments/sent` | Assignments sent; query: `status` |
-| `POST /assignments/:id/accept` | Accept; optional `scheduledAt` in body |
-| `POST /assignments/:id/decline` | Decline |
-| `POST /assignments/:id/cancel` | Cancel (sender only, pre-response) |
+**Assignments** — nested under `/tasks/:taskId` rather than a flat `/assignments` root, since every assignment operation is scoped to one task and its current assignee (the sender); this also keeps the route's authorization check ("is the caller this task's current assignee?") symmetric with the rest of the `/tasks` resource.
+
+| Method & Path | Purpose | Status |
+|---|---|---|
+| `POST /tasks/:taskId/assignments` | Create (`toUserId`, optional `message`); caller must be the task's current assignee | **M8** |
+| `POST /tasks/:taskId/assignments/:assignmentId/cancel` | Cancel (sender only, pre-response) | **M8** |
+| `GET /tasks/:id` | *(existing M3 route)* additionally returns `pendingAssignment: TaskAssignmentResponse \| null` — built by `TaskService.getTaskDetail`, a repository-level dependency, not a call into `AssignmentService` (see "Final task-detail dependency structure" below) | **M8** |
+| `GET /assignments/inbox` | Assignments received; query: `status` (default `PENDING`) | M9 |
+| `GET /assignments/sent` | Assignments sent; query: `status` | M9 |
+| `POST /assignments/:id/accept` | Accept; optional `scheduledAt` in body | M9 |
+| `POST /assignments/:id/decline` | Decline | M9 |
 
 Accept/decline/cancel are modeled as action endpoints rather than a generic `PATCH /assignments/:id` because each transition has different side effects (only `accept` touches `Task.assigneeId`, and optionally `scheduledAt` — see DATABASE.md §6). A single generic PATCH would hide that these aren't interchangeable field writes.
+
+`TaskAssignmentResponse` embeds `fromUser`/`toUser` as the M7 `PublicUser` shape (`id`/`name`/`username`) — never email — matching every other user-facing surface in the API (see M7's identity-separation decision in §8 below).
 
 List endpoints return `{ data: T[], nextCursor?: string }` (cursor pagination). Timestamps are ISO 8601 UTC on the wire; the mobile app converts to device-local time for display and computes day boundaries client-side before sending them to `/tasks/today` and `/tasks/schedule` (per DATABASE.md EC-8).
 
@@ -108,7 +129,7 @@ Services throw typed domain errors; a single error-handling middleware maps them
 | `UnauthenticatedError` | 401 | Missing/invalid/expired access token |
 | `ForbiddenError` | 403 | Authenticated, but not authorized for this task/assignment (REQUIREMENTS.md §2) |
 | `NotFoundError` | 404 | Task/assignment/user id doesn't exist or isn't visible to the caller |
-| `ConflictError` | 409 | Duplicate email, pending assignment already exists, double accept/decline, refresh token reuse |
+| `ConflictError` | 409 | Duplicate email, pending assignment already exists, mutating a task with a pending assignment (FR-13/EC-5), double accept/decline, refresh token reuse |
 | `InternalError` | 500 | Unexpected failure; logged with a correlation id, generic message returned to the client |
 
 Response shape:
@@ -166,3 +187,6 @@ Applied per milestone in [ROADMAP.md](./ROADMAP.md) — every milestone ships wi
 | Monorepo tooling | npm workspaces, no Turborepo/Nx | Project is small enough that extra build orchestration isn't justified yet |
 | Identity model (M7) | Email = private auth credential (login only); username = public product identity (discovery/collaboration only) | Keeps the sign-in credential out of any surface visible to other users; search/public-profile responses never contain email, so there's no code path where the two are conflated |
 | Username uniqueness | Always store pre-normalized (trimmed, lowercased, "@" stripped) + a plain Postgres `@unique` constraint | Case-insensitive uniqueness without a `citext` extension or collation trick — two different-case inputs normalize to the same stored string before the constraint ever sees them |
+| At-most-one-PENDING-assignment (M8) | Hand-written partial unique index (`WHERE status = 'PENDING'`) in the migration SQL, since Prisma's schema DSL has no partial-index syntax; a service-layer pre-check runs first only for a fast/friendly error, not as the safety guarantee | A plain check-then-insert in the service layer is racy — two concurrent requests can both pass the check before either inserts; only a database constraint is safe regardless of request timing (see DATABASE.md §8) |
+| How mobile learns of a pending assignment | Additive `pendingAssignment` field on `GET /tasks/:id`'s existing response, built by `TaskService.getTaskDetail` from a repository-level dependency (not `AssignmentService`) | Smallest change: no new read endpoint, no assignment state duplicated onto the `Task` row, and no cross-service coupling — `TaskAssignment` stays the sole source of truth, computed at read time |
+| Pending-assignment mutation freeze (FR-13/EC-5) | Atomic conditional `UPDATE`/`DELETE` (`assignments: { none: { status: "PENDING" } }` relational filter, compiled to a `NOT EXISTS` subquery) in `TaskRepository`, plus a service-level pre-check for a clean error in the common case | Mirrors FR-21's own database-level guarantee rather than a service-only check-then-act; see DATABASE.md §8 for the concurrency analysis and its stated limits |

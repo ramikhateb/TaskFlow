@@ -72,20 +72,21 @@ Each milestone is small enough to implement, test, and commit on its own, and le
 
 **Exit criteria**: a user can find another registered user by name or username (never email), see only their `id`/`name`/`username`, and existing email/password login/registration-adjacent flows continue to work exactly as before.
 
-## M8 — Task Assignment (Create)
+## M8 — Task Assignment — Create & Cancel
 
-- Delivers FR-20–FR-24, EC-1, EC-2, EC-4, EC-5.
-- `TaskAssignment` model + migration; transactional create (DATABASE.md §6).
-- Endpoints: `POST /assignments`, `POST /assignments/:id/cancel`, `GET /assignments/sent`.
-- `PATCH`/`DELETE` on `Task` updated to reject while the task has a `PENDING` assignment (EC-5) — `assigneeId` stays populated throughout, but the task is frozen pending a response.
-- Mobile: "assign to" flow from task detail, using M7's user search; sent-assignments list.
-- Tests: unit tests on every rejection path (self-assign, already-pending, edit-while-pending); integration test for the full create → cancel round trip.
+- Delivers FR-13, FR-20, FR-21, FR-22, FR-23, FR-24, EC-1, EC-2, EC-4, EC-5, EC-6 (history preservation for create/cancel).
+- `TaskAssignment` model + migration (DATABASE.md §4), including a hand-written **partial unique index** (`taskId` `WHERE status = 'PENDING'`) as the real concurrency guarantee behind FR-21 — see DATABASE.md §8 for why a service-layer check-then-insert alone was rejected.
+- Endpoints (nested under `/tasks`, not a flat `/assignments` root — see ARCHITECTURE.md §3): `POST /tasks/:taskId/assignments`, `POST /tasks/:taskId/assignments/:assignmentId/cancel`. `GET /tasks/:id` additively gains a `pendingAssignment` field. No `GET /assignments/sent` or other list endpoint yet (M9).
+- `TaskAssignmentResponse` embeds `fromUser`/`toUser` as M7's `PublicUser` (no email exposure).
+- FR-13/EC-5: `PATCH`/`DELETE /tasks/:id` reject with 409 while the task has a `PENDING` assignment, via the same atomic-conditional-write pattern as FR-21 (DATABASE.md §8) — not a service-only check. `TaskAssignment.task`'s FK is `onDelete: Cascade` (EC-7) so a delete, once actually reachable, takes its now-history assignment rows with it.
+- Mobile: "Assign to someone" flow on the task detail screen reusing M7's `UserSearchField` exactly; a pending-assignment banner (name/@username) with a cancel button, computed from the task detail query's new field — no new query key, no assignment state on the task list/Today/Schedule. While pending, the edit form's fields and the Save/complete/delete actions are visibly disabled with an inline explanation, mirroring the server-side freeze.
+- Tests: unit tests on every rejection path (self-assign, already-pending, non-assignee sender, wrong task status, mutation-while-pending) plus simulated-race tests; integration tests including a real 5-concurrent-request race on create (exactly 1×201, 4×409), a deterministic all-rejected concurrent-PATCH-while-pending race, a create-vs-patch race (self-consistency, not full serializability — see DATABASE.md §8), and history preservation across cancel → re-assign.
 
-**Exit criteria**: a user can assign a task to another user and cancel it before response; the task is correctly locked while pending.
+**Exit criteria**: a user can send a task to another user as a pending request and cancel it before response; `Task.assigneeId` never changes as a result; duplicate concurrent PENDING assignments on the same task are impossible even under a real race; and a task with a PENDING assignment is frozen against edits/status-changes/deletion (server-enforced) while remaining fully visible and readable in Tasks/Today/Schedule.
 
 ## M9 — Inbox, Accept & Decline
 
-- Delivers FR-25–FR-29, EC-3, EC-6.
+- Delivers FR-25–FR-29, EC-3, EC-6 (decline/accept side).
 - Endpoints: `GET /assignments/inbox`, `POST /assignments/:id/accept`, `POST /assignments/:id/decline`.
 - Mobile: Inbox screen with accept/decline actions.
 - Tests: integration tests for accept and decline transactions, concurrent double-response (EC-3), and reassignment after decline (EC-6).

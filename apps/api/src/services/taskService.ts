@@ -3,11 +3,14 @@ import type {
   CreateTaskRequest,
   DateRangeQuery,
   ListTasksQuery,
+  TaskDetailResponse,
   TaskResponse,
   TodayResponse,
   UpdateTaskRequest,
 } from "@taskflow/shared";
 import { ConflictError, NotFoundError } from "../errors";
+import { toAssignmentResponse } from "../mappers/assignmentResponse";
+import type { TaskAssignmentWithUsers } from "../repositories/taskAssignmentRepository";
 
 // Narrow interface (matching the repository module's shape) so this service
 // can be unit tested against a fake, with no Prisma import here at all.
@@ -31,7 +34,7 @@ export interface TaskRepository {
     creatorId: string;
     assigneeId: string;
   }): Promise<Task>;
-  update(
+  updateIfNotPending(
     id: string,
     data: Partial<{
       title: string;
@@ -43,14 +46,28 @@ export interface TaskRepository {
       deadline: Date | null;
       completedAt: Date | null;
     }>,
-  ): Promise<Task>;
-  deleteById(id: string): Promise<Task>;
+  ): Promise<Task | null>;
+  deleteIfNotPending(id: string): Promise<boolean>;
   findRelevantForToday(assigneeId: string, from: Date, to: Date): Promise<Task[]>;
   findManyByAssigneeAndScheduledRange(assigneeId: string, from: Date, to: Date): Promise<Task[]>;
 }
 
+// Narrow, repository-level dependency (FR-13/EC-5) — deliberately not a
+// dependency on AssignmentService. taskService needs to know "is there a
+// PENDING assignment for this task" for two purposes (freezing mutations,
+// and building GET /tasks/:id's pendingAssignment field), and both are
+// satisfied by this one read method. Depending on the repository directly,
+// the same way AssignmentService depends on TaskLookupRepository/
+// UserLookupRepository rather than on TaskService, keeps the two services
+// decoupled from each other — neither imports the other, so there's no risk
+// of a circular service dependency.
+export interface PendingAssignmentRepository {
+  findPendingByTaskId(taskId: string): Promise<TaskAssignmentWithUsers | null>;
+}
+
 export interface TaskServiceDeps {
   taskRepository: TaskRepository;
+  assignmentRepository: PendingAssignmentRepository;
 }
 
 // Product decision (2026-09-15): TODO, IN_PROGRESS, and DONE are fully
@@ -153,7 +170,7 @@ function toTaskResponse(task: Task): TaskResponse {
   };
 }
 
-export function createTaskService({ taskRepository }: TaskServiceDeps) {
+export function createTaskService({ taskRepository, assignmentRepository }: TaskServiceDeps) {
   // M3 is self-owned only (no TaskAssignment yet — ROADMAP.md M3), so every
   // authorization check here is keyed on assigneeId alone, per DATABASE.md's
   // invariant that assigneeId is the sole source of truth for who's
@@ -208,6 +225,32 @@ export function createTaskService({ taskRepository }: TaskServiceDeps) {
     return toTaskResponse(task);
   }
 
+  // GET /tasks/:id (M8): additively merges the task's current pending
+  // assignment (if any) into the detail response. Built here, not in the
+  // controller, and from a repository dependency, not AssignmentService —
+  // see PendingAssignmentRepository above.
+  async function getTaskDetail(userId: string, taskId: string): Promise<TaskDetailResponse> {
+    const task = await getTask(userId, taskId);
+    const pending = await assignmentRepository.findPendingByTaskId(taskId);
+    return { ...task, pendingAssignment: pending ? toAssignmentResponse(pending) : null };
+  }
+
+  // FR-13/EC-5: while a task has a PENDING assignment, the current assignee
+  // still owns it (read access, Tasks/Today/Schedule visibility are all
+  // untouched — see taskRepository's find* methods, none of which filter on
+  // assignment state), but every mutation is frozen until the assignment is
+  // resolved. This pre-check gives a clean, immediate error in the common
+  // (non-racing) case; the actual guarantee is the atomic conditional write
+  // in taskRepository.updateIfNotPending/deleteIfNotPending below — see the
+  // M8 follow-up report for the concurrency analysis of the residual race
+  // between this check and a concurrent assignment being created.
+  async function assertNotPending(taskId: string): Promise<void> {
+    const pending = await assignmentRepository.findPendingByTaskId(taskId);
+    if (pending) {
+      throw new ConflictError("Cannot modify a task while it has a pending assignment");
+    }
+  }
+
   async function updateTask(
     userId: string,
     taskId: string,
@@ -239,7 +282,9 @@ export function createTaskService({ taskRepository }: TaskServiceDeps) {
       throw new ConflictError("deadline must be on or after scheduledAt");
     }
 
-    const updated = await taskRepository.update(taskId, {
+    await assertNotPending(taskId);
+
+    const updated = await taskRepository.updateIfNotPending(taskId, {
       ...(input.title !== undefined && { title: input.title }),
       ...(input.description !== undefined && { description: input.description }),
       ...(input.priority !== undefined && { priority: input.priority }),
@@ -251,12 +296,23 @@ export function createTaskService({ taskRepository }: TaskServiceDeps) {
         completedAt: input.status === "DONE" ? new Date() : null,
       }),
     });
+    if (!updated) {
+      // A pending assignment was created between the pre-check above and
+      // this write winning the race — the atomic WHERE clause (not this
+      // service) is what actually caught it.
+      throw new ConflictError("Cannot modify a task while it has a pending assignment");
+    }
     return toTaskResponse(updated);
   }
 
   async function deleteTask(userId: string, taskId: string): Promise<void> {
     await findOwnTaskOrThrow(userId, taskId);
-    await taskRepository.deleteById(taskId);
+    await assertNotPending(taskId);
+
+    const deleted = await taskRepository.deleteIfNotPending(taskId);
+    if (!deleted) {
+      throw new ConflictError("Cannot delete a task while it has a pending assignment");
+    }
   }
 
   async function getToday(userId: string, range: DateRangeQuery): Promise<TodayResponse> {
@@ -286,7 +342,16 @@ export function createTaskService({ taskRepository }: TaskServiceDeps) {
     return tasks.map(toTaskResponse); // already ordered by scheduledAt asc (FR-15)
   }
 
-  return { listOwnTasks, createTask, getTask, updateTask, deleteTask, getToday, getSchedule };
+  return {
+    listOwnTasks,
+    createTask,
+    getTask,
+    getTaskDetail,
+    updateTask,
+    deleteTask,
+    getToday,
+    getSchedule,
+  };
 }
 
 export type TaskService = ReturnType<typeof createTaskService>;
