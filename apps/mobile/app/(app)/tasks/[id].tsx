@@ -354,6 +354,13 @@ export default function TaskDetailScreen() {
         )}
       </TouchableOpacity>
 
+      {updateTask.isError && (
+        <Text style={styles.error}>
+          Could not save — the task may have changed (e.g. a new pending assignment). Pull to
+          refresh and try again.
+        </Text>
+      )}
+
       {nextStep && (
         <TouchableOpacity
           style={[styles.button, styles.secondaryButton, !viewer.canEdit && styles.buttonDisabled]}
@@ -381,6 +388,8 @@ export default function TaskDetailScreen() {
       >
         <Text style={styles.deleteButtonText}>Delete</Text>
       </TouchableOpacity>
+
+      {deleteTask.isError && <Text style={styles.error}>Could not delete — please try again.</Text>}
     </ScrollView>
   );
 }

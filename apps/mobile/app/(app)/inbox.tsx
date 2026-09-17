@@ -73,46 +73,56 @@ function SentRow({ item }: { item: SentAssignmentResponse }) {
   const cancelAssignment = useCancelAssignment(item.task.id);
 
   return (
-    <View style={styles.row}>
-      <TouchableOpacity
-        style={styles.rowMain}
-        accessibilityRole="button"
-        onPress={() => router.push(`/tasks/${item.task.id}`)}
-      >
-        <View style={styles.rowTitleLine}>
-          <Text
-            style={[
-              styles.priorityBadge,
-              {
-                color: PRIORITY_COLORS[item.task.priority],
-                borderColor: PRIORITY_COLORS[item.task.priority],
-              },
-            ]}
-          >
-            {priorityLabel(item.task.priority)}
-          </Text>
-          <Text style={styles.rowTitle}>{item.task.title}</Text>
-        </View>
-        <Text style={styles.rowSubtitle}>
-          To {item.toUser.name} · @{item.toUser.username}
-        </Text>
-        <Text style={[styles.statusLabel, { color: SENT_STATUS_COLORS[item.status] }]}>
-          {sentStatusLabel(item.status)}
-        </Text>
-      </TouchableOpacity>
-
-      {item.status === "PENDING" && (
+    <View>
+      <View style={styles.row}>
         <TouchableOpacity
+          style={styles.rowMain}
           accessibilityRole="button"
-          disabled={cancelAssignment.isPending}
-          onPress={() => cancelAssignment.mutate(item.id)}
+          onPress={() => router.push(`/tasks/${item.task.id}`)}
         >
-          {cancelAssignment.isPending ? (
-            <ActivityIndicator />
-          ) : (
-            <Text style={styles.cancelText}>Cancel</Text>
-          )}
+          <View style={styles.rowTitleLine}>
+            <Text
+              style={[
+                styles.priorityBadge,
+                {
+                  color: PRIORITY_COLORS[item.task.priority],
+                  borderColor: PRIORITY_COLORS[item.task.priority],
+                },
+              ]}
+            >
+              {priorityLabel(item.task.priority)}
+            </Text>
+            <Text style={styles.rowTitle}>{item.task.title}</Text>
+          </View>
+          <Text style={styles.rowSubtitle}>
+            To {item.toUser.name} · @{item.toUser.username}
+          </Text>
+          <Text style={[styles.statusLabel, { color: SENT_STATUS_COLORS[item.status] }]}>
+            {sentStatusLabel(item.status)}
+          </Text>
         </TouchableOpacity>
+
+        {item.status === "PENDING" && (
+          <TouchableOpacity
+            accessibilityRole="button"
+            disabled={cancelAssignment.isPending}
+            onPress={() => cancelAssignment.mutate(item.id)}
+          >
+            {cancelAssignment.isPending ? (
+              <ActivityIndicator />
+            ) : (
+              <Text style={styles.cancelText}>Cancel</Text>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* M11: a stale Sent row's Cancel can lose a race (the recipient just
+          accepted/declined it) — surface that instead of silently doing
+          nothing, matching the error-surfacing pattern used everywhere else
+          a mutation can fail (e.g. task detail's Save/Delete). */}
+      {cancelAssignment.isError && (
+        <Text style={styles.rowError}>Could not cancel — it may have already been resolved.</Text>
       )}
     </View>
   );
@@ -238,4 +248,5 @@ const styles = StyleSheet.create({
   rowSent: { fontSize: 11, color: "#999" },
   statusLabel: { fontSize: 12, fontWeight: "700" },
   cancelText: { color: "#c0392b", fontWeight: "600" },
+  rowError: { color: "#c0392b", fontSize: 12, paddingBottom: 8 },
 });

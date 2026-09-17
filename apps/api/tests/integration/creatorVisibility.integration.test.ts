@@ -178,6 +178,18 @@ describe("Creator read-only visibility after transfer (M10, FR-32)", () => {
     expect(res.body.creator).toEqual({ id: rami.userId, name: "Rami", username: rami.username });
   });
 
+  it("the whole task-detail response never contains the word 'email' (M11, Phase 12)", async () => {
+    const rami = await registerUser("rami@example.com", "Rami");
+    const daniel = await registerUser("daniel@example.com", "Daniel");
+    const task = await setupTransferredTask(rami, daniel);
+
+    const res = await request(app)
+      .get(`/tasks/${task.id}`)
+      .set("Authorization", `Bearer ${rami.accessToken}`);
+
+    expect(JSON.stringify(res.body)).not.toContain("email");
+  });
+
   it("rejects PATCH from the creator", async () => {
     const rami = await registerUser("rami@example.com", "Rami");
     const daniel = await registerUser("daniel@example.com", "Daniel");

@@ -107,12 +107,14 @@ Each milestone is small enough to implement, test, and commit on its own, and le
 
 **Exit criteria**: the full journey in PRODUCT.md ("assign → accept → scheduled") has correct creator/assignee visibility on both sides; a user can review the assignments they've sent regardless of outcome; and none of M10's read-access widening leaks into assignee-scoped list views or into mutation authorization.
 
-## M11 — Authorization & Edge-Case Hardening
+## M11 — Authorization, Security, State-Machine, and Edge-Case Hardening
 
-- Cross-cutting pass explicitly re-verifying every rule in REQUIREMENTS.md §2 and every edge case in §3 with targeted tests (some will already be covered by earlier milestones — this milestone closes any gaps rather than re-deriving from scratch).
-- Includes EC-7 (delete with assignment history) and any timing/race conditions not yet covered.
+A cross-cutting audit pass, not a feature milestone: every documented authorization, privacy, mass-assignment, state-machine, and concurrency invariant from M2-M10 was re-verified against the actual running system (cross-user attack matrix with 4 named accounts, malicious/malformed payloads, an exhaustive 9-combination assignment-state negative-transition matrix, a direct repository-level audit of the M9 acceptance transaction's rollback behavior, expired-token/expired-refresh-token coverage, and explicit response-privacy negative assertions across every collaboration endpoint). The audit found the existing M2-M10 implementation already correct in every case tested — no authorization bypass, mass-assignment, or state-machine violation was reproduced. The gaps closed were in **test coverage**, not application logic, plus two small mobile UX fixes (surfacing a `PATCH`/`DELETE`/cancel failure inline instead of silently doing nothing on a stale/raced action, matching the error-surfacing pattern already used elsewhere).
+- Also verified directly against both Postgres databases (not just `prisma migrate status`, which only proves a migration *ran*): the `TaskAssignment_one_pending_per_task` partial unique index, all documented indexes, and every FK's cascade/restrict behavior — now a durable `$queryRaw`-based regression test, not a one-time manual check.
+- EC-17 (hard-delete cascades assignment history) reviewed only, per the fix policy — confirmed to still match schema/docs, not redesigned into soft-deletion.
+- No schema change, no new migration — this milestone touches tests and two small mobile UI fixes only.
 
-**Exit criteria**: a checklist pass over REQUIREMENTS.md §2/§3 with a test reference for every line.
+**Exit criteria**: every core domain invariant in the M11 audit brief has at least one integration test exercising it directly against the real API and database; all M2-M10 regression tests remain green; no invariant violation found remains unfixed.
 
 ## M12 — Polish & Store Readiness
 

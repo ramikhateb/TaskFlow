@@ -1,13 +1,16 @@
+import jwt from "jsonwebtoken";
 import request from "supertest";
 import type { Express } from "express";
 import { createApp } from "../../src/app";
 import { loadEnv } from "../../src/env";
 import { prisma } from "../../src/lib/prisma";
+import { hashRefreshToken } from "../../src/lib/tokens";
 
 let app: Express;
+const env = loadEnv();
 
 beforeAll(() => {
-  app = createApp(loadEnv());
+  app = createApp(env);
 });
 
 beforeEach(async () => {
@@ -46,6 +49,20 @@ describe("POST /auth/register", () => {
 
     const stored = await prisma.user.findUniqueOrThrow({ where: { email: "alice@example.com" } });
     expect(stored.passwordHash).not.toBe("password1");
+  });
+
+  // M11 (Phase 12): the response's `user` object is the auth-scoped
+  // `UserProfile` shape (id/email/name/username — email is intentional
+  // here, this IS the account's own auth response), but it must never leak
+  // the password hash itself, and the shape must be exactly what's
+  // documented, not "happens to also include extra fields today."
+  it("never includes passwordHash anywhere in the response", async () => {
+    const res = await request(app).post("/auth/register").send(validRegistration);
+
+    expect(res.body).not.toHaveProperty("passwordHash");
+    expect(res.body.user).not.toHaveProperty("passwordHash");
+    expect(Object.keys(res.body.user)).toEqual(["id", "email", "name", "username"]);
+    expect(JSON.stringify(res.body)).not.toContain("passwordHash");
   });
 
   it("rejects a duplicate email with 409 CONFLICT", async () => {
@@ -184,6 +201,18 @@ describe("POST /auth/login", () => {
     expect(res.body.user.email).toBe(validRegistration.email);
   });
 
+  it("never includes passwordHash, tokenHash, or familyId anywhere in the response (M11, Phase 12)", async () => {
+    const res = await request(app)
+      .post("/auth/login")
+      .send({ email: validRegistration.email, password: validRegistration.password });
+
+    const serialized = JSON.stringify(res.body);
+    expect(serialized).not.toContain("passwordHash");
+    expect(serialized).not.toContain("tokenHash");
+    expect(serialized).not.toContain("familyId");
+    expect(Object.keys(res.body.user)).toEqual(["id", "email", "name", "username"]);
+  });
+
   it("rejects a wrong password with a generic 401 message", async () => {
     const res = await request(app)
       .post("/auth/login")
@@ -230,6 +259,38 @@ describe("GET /auth/me", () => {
     const res = await request(app).get("/auth/me").set("Authorization", "Bearer not-a-real-jwt");
     expect(res.status).toBe(401);
   });
+
+  // M11 (Phase 11): an expired token is structurally valid (correct
+  // signature, correct payload shape) but must still be rejected —
+  // distinct from "malformed" above, which never had a valid signature to
+  // begin with. Signed directly with the same secret/library the app uses,
+  // just with a already-elapsed TTL — not a production hook, the exact
+  // same code path `signAccessToken` uses.
+  it("rejects an expired access token with 401", async () => {
+    const { body } = await request(app).post("/auth/register").send(validRegistration);
+    const expiredToken = jwt.sign({ sub: body.user.id }, env.JWT_ACCESS_SECRET, {
+      expiresIn: -10,
+    });
+
+    const res = await request(app).get("/auth/me").set("Authorization", `Bearer ${expiredToken}`);
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("UNAUTHENTICATED");
+  });
+
+  it.each([
+    ["no Bearer prefix at all", "sometoken"],
+    ["lowercase bearer", "bearer sometoken"],
+    ["Bearer with no token", "Bearer "],
+    ["Bearer with only whitespace", "Bearer    "],
+  ])(
+    "rejects a malformed Authorization header (%s) with 401, not a crash",
+    async (_label, header) => {
+      const res = await request(app).get("/auth/me").set("Authorization", header);
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe("UNAUTHENTICATED");
+    },
+  );
 });
 
 describe("POST /auth/refresh", () => {
@@ -270,6 +331,32 @@ describe("POST /auth/refresh", () => {
   it("rejects an unknown refresh token with 401", async () => {
     const res = await request(app).post("/auth/refresh").send({ refreshToken: "unknown-token" });
     expect(res.status).toBe(401);
+  });
+
+  // M11 (Phase 11): distinct from "unknown" (never existed) and "reused"
+  // (EC-9, already revoked) — a token that's real, still unrevoked, but
+  // past its own expiresAt. `authService.refresh` has this exact branch;
+  // it had no test until now. TTL is normally 30 days (REFRESH_TOKEN_TTL_DAYS),
+  // so this manipulates the stored row's expiresAt directly (the only way
+  // to reach this branch deterministically without literally waiting) —
+  // the token itself was minted through the real registration flow.
+  it("rejects an expired (but otherwise valid, unrevoked) refresh token with 401", async () => {
+    const { body } = await request(app).post("/auth/register").send(validRegistration);
+    await prisma.refreshToken.updateMany({
+      where: { tokenHash: hashRefreshToken(body.refreshToken) },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+
+    const res = await request(app).post("/auth/refresh").send({ refreshToken: body.refreshToken });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe("UNAUTHENTICATED");
+
+    // Confirm it wasn't rotated/consumed by this rejected attempt.
+    const stored = await prisma.refreshToken.findUniqueOrThrow({
+      where: { tokenHash: hashRefreshToken(body.refreshToken) },
+    });
+    expect(stored.revokedAt).toBeNull();
   });
 });
 

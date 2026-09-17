@@ -275,6 +275,21 @@ describe("POST /assignments/:assignmentId/decline", () => {
     expect(res.body.respondedAt).not.toBeNull();
   });
 
+  it("never exposes email in the decline response's fromUser/toUser (M11, Phase 12)", async () => {
+    const rami = await registerUser("rami@example.com", "Rami");
+    const daniel = await registerUser("daniel@example.com", "Daniel");
+    const task = await createTask(rami.accessToken);
+    const created = await sendAssignment(rami.accessToken, task.id, daniel.userId);
+
+    const res = await request(app)
+      .post(`/assignments/${created.id}/decline`)
+      .set("Authorization", `Bearer ${daniel.accessToken}`);
+
+    expect(Object.keys(res.body.fromUser)).toEqual(["id", "name", "username"]);
+    expect(Object.keys(res.body.toUser)).toEqual(["id", "name", "username"]);
+    expect(JSON.stringify(res.body)).not.toContain("email");
+  });
+
   it("leaves assigneeId and creatorId unchanged", async () => {
     const rami = await registerUser("rami@example.com", "Rami");
     const daniel = await registerUser("daniel@example.com", "Daniel");
@@ -417,6 +432,22 @@ describe("POST /assignments/:assignmentId/accept", () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("ACCEPTED");
     expect(res.body.respondedAt).not.toBeNull();
+  });
+
+  it("never exposes email in the accept response's fromUser/toUser (M11, Phase 12)", async () => {
+    const rami = await registerUser("rami@example.com", "Rami");
+    const daniel = await registerUser("daniel@example.com", "Daniel");
+    const task = await createTask(rami.accessToken);
+    const created = await sendAssignment(rami.accessToken, task.id, daniel.userId);
+
+    const res = await request(app)
+      .post(`/assignments/${created.id}/accept`)
+      .set("Authorization", `Bearer ${daniel.accessToken}`)
+      .send({ scheduledAt: null });
+
+    expect(Object.keys(res.body.fromUser)).toEqual(["id", "name", "username"]);
+    expect(Object.keys(res.body.toUser)).toEqual(["id", "name", "username"]);
+    expect(JSON.stringify(res.body)).not.toContain("email");
   });
 
   it("transfers assigneeId to the recipient and leaves creatorId unchanged", async () => {
@@ -707,6 +738,48 @@ describe("Accept — scheduling (FR-30, EC-13)", () => {
       .send({ scheduledAt: "2026-09-26T14:00:00.000Z" });
 
     expect(res.status).toBe(200);
+  });
+
+  // M11 (Phase 9): EC-13 is "deadline >= scheduledAt" — equality is
+  // explicitly valid, not just strictly-before. Already covered for plain
+  // task create/update (task.integration.test.ts); this is the same
+  // boundary on the accept path specifically.
+  it("accepts a scheduledAt exactly equal to the deadline", async () => {
+    const rami = await registerUser("rami@example.com", "Rami");
+    const daniel = await registerUser("daniel@example.com", "Daniel");
+    const task = await createTask(rami.accessToken, {
+      title: "Task",
+      deadline: "2026-09-27T17:00:00.000Z",
+    });
+    const created = await sendAssignment(rami.accessToken, task.id, daniel.userId);
+
+    const res = await request(app)
+      .post(`/assignments/${created.id}/accept`)
+      .set("Authorization", `Bearer ${daniel.accessToken}`)
+      .send({ scheduledAt: "2026-09-27T17:00:00.000Z" });
+
+    expect(res.status).toBe(200);
+    const stored = await prisma.task.findUniqueOrThrow({ where: { id: task.id } });
+    expect(stored.scheduledAt?.toISOString()).toBe(stored.deadline?.toISOString());
+  });
+
+  // M11 (Phase 9): the API's wire format is ISO 8601 UTC only (Z suffix) —
+  // ARCHITECTURE.md §3. A non-UTC offset is a validation error, not a
+  // silently-accepted alternate representation; the mobile client is
+  // responsible for converting to UTC before ever sending a timestamp.
+  it("rejects a non-UTC-offset timestamp with 400 VALIDATION_ERROR", async () => {
+    const rami = await registerUser("rami@example.com", "Rami");
+    const daniel = await registerUser("daniel@example.com", "Daniel");
+    const task = await createTask(rami.accessToken);
+    const created = await sendAssignment(rami.accessToken, task.id, daniel.userId);
+
+    const res = await request(app)
+      .post(`/assignments/${created.id}/accept`)
+      .set("Authorization", `Bearer ${daniel.accessToken}`)
+      .send({ scheduledAt: "2026-09-26T16:00:00+02:00" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
   });
 
   it('"Schedule later" is valid even when a deadline exists', async () => {
