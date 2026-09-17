@@ -5,6 +5,7 @@ import type { Env } from "./env";
 import { errorHandler } from "./middleware/errorHandler";
 import { createAssignmentRoutes } from "./routes/assignmentRoutes";
 import { createAuthRoutes } from "./routes/authRoutes";
+import { createInboxRoutes } from "./routes/inboxRoutes";
 import { createTaskRoutes } from "./routes/taskRoutes";
 import { createUserRoutes } from "./routes/userRoutes";
 
@@ -27,6 +28,9 @@ export function createApp(env: Env): Express {
   // Different path depth ("/:taskId/assignments...") than taskRoutes'
   // "/:id" — no route-matching ambiguity between the two routers.
   app.use("/tasks", createAssignmentRoutes(env));
+  // M9: Inbox/accept/decline — a flat "/assignments" root, not nested
+  // under "/tasks" (see routes/inboxRoutes.ts).
+  app.use("/assignments", createInboxRoutes(env));
   app.use("/users", createUserRoutes(env));
 
   // Must be registered after all routes.

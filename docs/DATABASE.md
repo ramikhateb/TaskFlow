@@ -201,7 +201,7 @@ Enforced in the `TaskService`, not the database — a `CHECK` constraint was con
 
 `ACCEPTED`, `DECLINED`, `CANCELLED` are terminal for that row; a later assignment is a new row (EC-6). Only the `accept` transition ever writes `Task.assigneeId` — creating, declining, and cancelling are pure `TaskAssignment` state changes.
 
-**Implementation status:** M8 implements `create` and `cancel` only (`PENDING`/`CANCELLED`), plus FR-13/EC-5's mutation freeze (below). `accept`/`decline` and the resulting `Task.assigneeId` write are M9.
+**Implementation status:** M8 implemented `create` and `cancel` (`PENDING`/`CANCELLED`) plus FR-13/EC-5's mutation freeze. M9 adds `accept`/`decline` and the resulting `Task.assigneeId` write — all four transitions (create/cancel/accept/decline) are now implemented; only M10's post-acceptance creator visibility (FR-32) and a sent-assignments list (FR-29) remain outstanding.
 
 ### What each assignment state means for the task (FR-13/EC-5)
 
@@ -210,8 +210,8 @@ Enforced in the `TaskService`, not the database — a `CHECK` constraint was con
 | No assignment / none `PENDING` | unchanged | current assignee | normal | allowed |
 | `PENDING` | **unchanged** | current assignee (unchanged) | normal — task still appears in Tasks/Today/Schedule exactly as before | **frozen**: edit, status change (including complete), cancel-the-task, and delete are all rejected with `ConflictError` (409). The sender may still cancel the *assignment* — that's the one action available that isn't a plain read. |
 | `CANCELLED` | unchanged | current assignee (unchanged) | normal | allowed again, immediately |
-| `DECLINED` *(M9)* | unchanged | current assignee (unchanged) — decline restores full normal control, same as cancel | normal | allowed again, immediately |
-| `ACCEPTED` *(M9)* | **changes to the recipient**, atomically with the transition | recipient | normal, now from the recipient's perspective | allowed again, for the new assignee |
+| `DECLINED` | unchanged | current assignee (unchanged) — decline restores full normal control, same as cancel | normal | allowed again, immediately |
+| `ACCEPTED` | **changes to the recipient**, atomically with the transition | recipient | normal, now from the recipient's perspective | allowed again, for the new assignee |
 
 The freeze is enforced in `TaskService.updateTask`/`deleteTask`, which only ever call `TaskRepository.updateIfNotPending`/`deleteIfNotPending` — see §8's "Enforcing the pending-assignment mutation freeze" for the concurrency mechanism, which mirrors FR-21's own database-level guarantee rather than relying on a service-level check alone.
 
@@ -221,7 +221,7 @@ The freeze is enforced in `TaskService.updateTask`/`deleteTask`, which only ever
 - **Decline / cancel**: update `TaskAssignment.status`/`respondedAt` only. Again, no write to `Task`.
 - **Accept**: update `TaskAssignment.status`/`respondedAt` **and** `Task.assigneeId := toUserId` in a single Prisma transaction, so the assignment can never be observed as `ACCEPTED` while the task still shows the old assignee, or vice versa.
 
-The accept transaction additionally applies `scheduledAt` if the recipient supplied one (FR-30), so acceptance and initial scheduling can't be observed as separate, inconsistent steps.
+The accept transaction always applies the recipient's `scheduledAt` choice (FR-30) — a specific value, or `null` for "schedule later"; the field is required, not optional, so there's no default to reason about — so acceptance and initial scheduling can't be observed as separate, inconsistent steps. The sender's prior `scheduledAt` is never read by this path at all; it's simply overwritten with whatever the recipient's request body contains.
 
 This is simpler than the alternative (clearing `assigneeId` on create and restoring it on decline/cancel): only one transition — accept — ever needs to touch `Task` at all, and there is never a window where a task has no responsible party.
 
@@ -292,3 +292,31 @@ WHERE id = $1
 **Why that's not implemented now:** unlike FR-21's race (which is triggerable by two different concurrent requests attempting the same action, and was given the stronger database-constraint treatment for exactly that reason), this residual window requires the *same* principal — only the task's current assignee can create an assignment on it — to fire two conflicting requests within a sub-millisecond window of each other. The realistic trigger is a double-tap or two-tabs-open self-collision, not an adversarial or cross-user scenario, and the outcome of losing the race is a last-write-wins style edge case, not a security or data-integrity breach. Given that, explicit row locking (with its added latency and cross-table deadlock surface between `Task` and `TaskAssignment`) is deferred rather than added speculatively — worth revisiting if usage patterns ever show otherwise, e.g. before a security hardening pass (see ARCHITECTURE.md §6).
 
 Verified empirically two ways: (1) firing 5 concurrent `PATCH` requests against a task with an *already-committed* `PENDING` assignment — fully deterministic, since the assignment's commit strictly precedes all five — and confirming all 5 are rejected with 409; (2) racing a `PATCH` against a concurrent assignment-`POST` on a fresh task and confirming the database ends up in a self-consistent state either way (the task's stored fields match whichever result the `PATCH` actually got, `assigneeId` is unchanged, and exactly one `PENDING` row exists) — this does not, and cannot, distinguish the benign ordering from the theoretical sub-statement race described above, since both look identical in the end state.
+
+### The M9 acceptance transaction and its concurrency guarantee
+
+FR-25 requires that accepting an assignment update two rows — `TaskAssignment.status`/`respondedAt` and `Task.assigneeId`/`scheduledAt` — such that neither can ever be observed without the other. `taskAssignmentRepository.acceptPendingAssignment` does this with a single Prisma **interactive transaction** (`prisma.$transaction(async (tx) => {...})`, a real `BEGIN`/`COMMIT`/`ROLLBACK` — not the `$transaction([...])` batch form, which can't express "only do the second write if the first one actually matched"):
+
+```ts
+return await prisma.$transaction(async (tx) => {
+  const assignmentUpdate = await tx.taskAssignment.updateMany({
+    where: { id, status: "PENDING" },
+    data: { status: "ACCEPTED", respondedAt: new Date() },
+  });
+  if (assignmentUpdate.count === 0) throw new AssignmentNotPendingError();
+
+  const taskUpdate = await tx.task.updateMany({
+    where: { id: taskId, assigneeId: fromUserId },
+    data: { assigneeId: toUserId, scheduledAt },
+  });
+  if (taskUpdate.count === 0) throw new AssignmentNotPendingError();
+
+  return tx.taskAssignment.findUniqueOrThrow({ where: { id }, include });
+});
+```
+
+Both writes reuse the same atomic-conditional-`updateMany` idiom as `cancelIfPending`/`declineIfPending`/`updateIfNotPending`: a `WHERE` clause tied to the exact state being transitioned *from*, not a read-then-write. If either affects zero rows, the callback throws, Prisma rolls back the whole transaction, and the repository function returns `null` — the service maps that to `ConflictError`. The `Task` write's `assigneeId: fromUserId` clause is defense in depth, not the primary guard: structurally, `assigneeId` can only equal `fromUserId` while this assignment is `PENDING` (the partial unique index guarantees no sibling `PENDING` row could have already raced it to `ACCEPTED`), but the transfer is still conditioned on it explicitly rather than assumed.
+
+**Why this closes EC-3 for every pair of resolution attempts, not just double-accept:** cancel (M8), decline, and accept's *first* write all gate on the identical condition — `UPDATE "TaskAssignment" ... WHERE id = ? AND status = 'PENDING'` — against the identical row. Postgres takes a row lock on a match; a second concurrent statement against that same row (whether it's another accept, a decline, or a cancel) blocks until the first transaction commits or rolls back, then re-evaluates its own `WHERE` clause against the new committed state (ordinary `UPDATE` semantics under `READ COMMITTED` — no `SERIALIZABLE` isolation or explicit locking needed). Since the row's `status` is no longer `'PENDING'`, the second statement's `updateMany` matches zero rows, and whichever transition it belongs to correctly reports `ConflictError`. This is the "one coherent state machine" property: because every resolution path shares the identical guard on the identical row, they compose correctly with each other automatically, not by virtue of any one of them knowing the other two exist.
+
+Verified empirically as real concurrent HTTP requests (not just a unit-level simulation) in `tests/integration/inbox.integration.test.ts`: 5 simultaneous accepts on the same assignment → exactly 1×200, 4×409; accept raced against decline → exactly one 200; accept raced against a sender cancel → exactly one 200; decline raced against cancel → exactly one 200; and a three-way race (accept + decline + cancel all at once) → the assignment always lands in exactly one of `ACCEPTED`/`DECLINED`/`CANCELLED`, and `Task.assigneeId` always agrees with whichever one won (the recipient only for `ACCEPTED`, the sender for either of the other two) — never a contradictory combination.

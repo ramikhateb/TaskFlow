@@ -1,10 +1,17 @@
-import type { Task, TaskAssignment, User } from "@prisma/client";
-import type { CreateTaskAssignmentRequest, TaskAssignmentResponse } from "@taskflow/shared";
+import type { Task, User } from "@prisma/client";
+import type {
+  AcceptTaskAssignmentRequest,
+  CreateTaskAssignmentRequest,
+  InboxResponse,
+  TaskAssignmentResponse,
+} from "@taskflow/shared";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
-import { toAssignmentResponse } from "../mappers/assignmentResponse";
-import { DuplicatePendingAssignmentError } from "../repositories/taskAssignmentRepository";
-
-type TaskAssignmentWithUsers = TaskAssignment & { fromUser: User; toUser: User };
+import { isScheduleValid } from "../lib/scheduling";
+import { toAssignmentResponse, toInboxAssignmentResponse } from "../mappers/assignmentResponse";
+import {
+  DuplicatePendingAssignmentError,
+  type TaskAssignmentWithUsers,
+} from "../repositories/taskAssignmentRepository";
 
 // Narrow interfaces (matching the repository modules' shape) so this
 // service can be unit tested against fakes, with no Prisma import here —
@@ -12,6 +19,7 @@ type TaskAssignmentWithUsers = TaskAssignment & { fromUser: User; toUser: User }
 export interface TaskAssignmentRepository {
   findById(id: string): Promise<TaskAssignmentWithUsers | null>;
   findPendingByTaskId(taskId: string): Promise<TaskAssignmentWithUsers | null>;
+  findInboxForRecipient(toUserId: string): Promise<TaskAssignmentWithUsers[]>;
   create(data: {
     taskId: string;
     fromUserId: string;
@@ -19,6 +27,14 @@ export interface TaskAssignmentRepository {
     message: string | null;
   }): Promise<TaskAssignmentWithUsers>;
   cancelIfPending(id: string): Promise<TaskAssignmentWithUsers | null>;
+  declineIfPending(id: string): Promise<TaskAssignmentWithUsers | null>;
+  acceptPendingAssignment(params: {
+    id: string;
+    taskId: string;
+    fromUserId: string;
+    toUserId: string;
+    scheduledAt: Date | null;
+  }): Promise<TaskAssignmentWithUsers | null>;
 }
 
 export interface TaskLookupRepository {
@@ -131,7 +147,97 @@ export function createAssignmentService({
   // read path never depends on AssignmentService at all. See the M8
   // follow-up report ("keep controllers thin") for why.
 
-  return { createAssignment, cancelAssignment };
+  // FR-26/FR-27 (M9): only the recipient may decline, only while PENDING.
+  // Declining never touches Task at all (assigneeId was never changed by
+  // create, so there's nothing to revert) — a pure TaskAssignment state
+  // change, same shape as cancelAssignment above. Once this commits, the
+  // sender's task is unfrozen again (TaskService's freeze check simply
+  // finds no PENDING row anymore).
+  async function declineAssignment(
+    callerId: string,
+    assignmentId: string,
+  ): Promise<TaskAssignmentResponse> {
+    const assignment = await assignmentRepository.findById(assignmentId);
+    // Same enumeration-resistance pattern as cancelAssignment: wrong id,
+    // or a real assignment the caller isn't the recipient of, are reported
+    // identically.
+    if (!assignment || assignment.toUserId !== callerId) {
+      throw new NotFoundError("Assignment not found");
+    }
+
+    const declined = await assignmentRepository.declineIfPending(assignmentId);
+    if (!declined) {
+      // Already ACCEPTED/DECLINED/CANCELLED — a state conflict, not a
+      // visibility problem (the caller does own this assignment).
+      throw new ConflictError("This assignment is no longer pending");
+    }
+    return toAssignmentResponse(declined);
+  }
+
+  // FR-25/FR-30 (M9): the only transition that ever writes Task.assigneeId,
+  // and the only one where the recipient supplies input beyond "which
+  // assignment" — their scheduling choice. See
+  // taskAssignmentRepository.acceptPendingAssignment for the transaction
+  // itself and the M9 report for the concurrency argument; this method's
+  // job is authorization (recipient, still PENDING) and validating that
+  // choice against FR-8/EC-13 before ever attempting the transactional
+  // write.
+  async function acceptAssignment(
+    callerId: string,
+    assignmentId: string,
+    input: AcceptTaskAssignmentRequest,
+  ): Promise<TaskAssignmentResponse> {
+    const assignment = await assignmentRepository.findById(assignmentId);
+    if (!assignment || assignment.toUserId !== callerId) {
+      throw new NotFoundError("Assignment not found");
+    }
+    // Fast, friendly pre-check (EC-3) — not the concurrency guarantee; see
+    // acceptPendingAssignment's own atomic conditional update for that.
+    if (assignment.status !== "PENDING") {
+      throw new ConflictError("This assignment is no longer pending");
+    }
+
+    // FR-30: null means "Schedule later" — the sender's previous
+    // scheduledAt (on assignment.task) is never read or carried over here,
+    // which is precisely how it's prevented from transferring: the new
+    // value comes only from the recipient's own request body.
+    const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
+
+    // EC-13, preserved: the recipient can't schedule past the task's
+    // existing deadline (set by the creator/sender, unchanged by
+    // acceptance — FR-31). "Schedule later" (null) always passes, since
+    // isScheduleValid treats either side being null as valid.
+    if (!isScheduleValid(scheduledAt, assignment.task.deadline)) {
+      throw new ConflictError("scheduledAt must be on or before the task's deadline");
+    }
+
+    const accepted = await assignmentRepository.acceptPendingAssignment({
+      id: assignmentId,
+      taskId: assignment.taskId,
+      fromUserId: assignment.fromUserId,
+      toUserId: callerId,
+      scheduledAt,
+    });
+    if (!accepted) {
+      // Lost the race to a concurrent cancel/decline/second-accept — see
+      // the M9 report's concurrency section.
+      throw new ConflictError("This assignment is no longer pending");
+    }
+    return toAssignmentResponse(accepted);
+  }
+
+  // FR-28: incoming PENDING requests only, newest first, scoped
+  // exclusively to the authenticated caller via toUserId — never a
+  // client-supplied user id. Uses the existing @@index([toUserId, status])
+  // query path (findInboxForRecipient), no pagination (out of scope for
+  // M9 — a personal inbox of pending requests is not expected to grow
+  // large enough to need it; see the M9 report if this changes).
+  async function getInbox(callerId: string): Promise<InboxResponse> {
+    const rows = await assignmentRepository.findInboxForRecipient(callerId);
+    return { data: rows.map(toInboxAssignmentResponse) };
+  }
+
+  return { createAssignment, cancelAssignment, declineAssignment, acceptAssignment, getInbox };
 }
 
 export type AssignmentService = ReturnType<typeof createAssignmentService>;

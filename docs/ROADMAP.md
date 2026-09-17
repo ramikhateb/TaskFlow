@@ -84,24 +84,27 @@ Each milestone is small enough to implement, test, and commit on its own, and le
 
 **Exit criteria**: a user can send a task to another user as a pending request and cancel it before response; `Task.assigneeId` never changes as a result; duplicate concurrent PENDING assignments on the same task are impossible even under a real race; and a task with a PENDING assignment is frozen against edits/status-changes/deletion (server-enforced) while remaining fully visible and readable in Tasks/Today/Schedule.
 
-## M9 — Inbox, Accept & Decline
+## M9 — Inbox, Accept & Decline + Recipient Scheduling
 
-- Delivers FR-25–FR-29, EC-3, EC-6 (decline/accept side).
-- Endpoints: `GET /assignments/inbox`, `POST /assignments/:id/accept`, `POST /assignments/:id/decline`.
-- Mobile: Inbox screen with accept/decline actions.
-- Tests: integration tests for accept and decline transactions, concurrent double-response (EC-3), and reassignment after decline (EC-6).
+- Delivers FR-25, FR-26, FR-27, FR-28, FR-30, FR-31, EC-3, EC-6 (decline/accept side). Pulls FR-30 (recipient scheduling) forward from its originally-planned M10 slot — Option B scheduling is part of what makes "accept" a complete, usable action, not a separate step. **Does not** deliver FR-29 (sent-assignments list) or FR-32 (creator read-only visibility after transfer) — both explicitly deferred, see M10 below.
+- Endpoints: `GET /assignments/inbox` (recipient's `PENDING` requests, newest first, via the existing `@@index([toUserId, status])` — no pagination, no `userId` query param), `POST /assignments/:assignmentId/accept` (body: `{ scheduledAt: string | null }`, required not optional), `POST /assignments/:assignmentId/decline`. Flat under `/assignments`, not nested under `/tasks/:taskId` like M8's create/cancel — see ARCHITECTURE.md §3.
+- The acceptance transaction (`taskAssignmentRepository.acceptPendingAssignment`) flips `TaskAssignment` to `ACCEPTED` and writes `Task.assigneeId`/`scheduledAt` in one Prisma interactive transaction, using the same atomic-conditional-`updateMany` idiom as M8's `cancelIfPending` for both writes — see DATABASE.md §8. This is also what makes accept/decline/cancel mutually exclusive under concurrency (EC-3): all three gate on `WHERE status = 'PENDING'` against the same row, so ordinary Postgres row-locking resolves any race between them with no extra locking.
+- FR-30: the recipient's `scheduledAt` choice always replaces the sender's previous value (a specific timestamp, or `null` for "schedule later") — the sender's prior `scheduledAt` is never read by the accept path. Validated against the task's existing `deadline` server-side (EC-13) before the transaction runs; "schedule later" is always valid regardless of deadline.
+- `InboxAssignmentResponse`/`InboxTaskSummary`: a dedicated contract, not a reuse of `TaskAssignmentResponse`/`TaskResponse` — deliberately excludes the sender's `scheduledAt` (personal planning state, about to be replaced) and `toUser` (always the caller). See ARCHITECTURE.md §3.
+- Mobile: Inbox added as a fifth tab (Today/Schedule/Tasks/Inbox/Profile); a request-detail screen (`app/(app)/inbox-detail/[id].tsx`, hidden-from-tab-bar stack sibling, same pattern as `tasks/`) showing sender/task/message with Decline/Accept actions; Accept opens an inline scheduling step (reusing M4's `DateTimeField`) offering "choose a date/time" or "schedule later" before actually submitting.
+- Tests: unit tests on every accept/decline authorization and state-conflict path, scheduling validation (before/after deadline, schedule-later, sender's value replaced), and a double-accept concurrency simulation; integration tests for the Inbox query (visibility, ordering, exclusions, field shape), decline, accept, scheduling, Today/Schedule reuse post-acceptance, sender-side access loss, and four concurrency races fired as real concurrent HTTP requests (double-accept, accept-vs-decline, accept-vs-cancel, decline-vs-cancel, plus a three-way race) — all resolving to exactly one terminal state with `assigneeId` agreeing with the winner.
 
-**Exit criteria**: the full "assign → Inbox → accept/decline" loop works end-to-end between two real accounts; `assigneeId` changes only on accept, and is unaffected by decline.
+**Exit criteria**: the full "assign → Inbox → accept (with scheduling) / decline" loop works end-to-end between two real accounts; `assigneeId` changes only on `ACCEPTED`, is unaffected by `DECLINED`/`CANCELLED`, and no concurrent pair of resolution attempts can both succeed.
 
-## M10 — Post-Acceptance Scheduling & Creator Visibility
+## M10 — Post-Acceptance Visibility & History
 
-- Delivers FR-30–FR-32.
-- `accept` endpoint accepts an optional `scheduledAt`.
-- Read endpoints updated so the original creator retains read-only access to a task they no longer hold (FR-32).
-- Mobile: schedule-on-accept UI; creator's read-only view of tasks they created but don't own.
-- Tests: integration tests confirming deadline/priority/category persist unchanged through acceptance, and that the creator can read but not write after handoff.
+- Delivers FR-29, FR-32 (the parts of the original M9/M10 split not pulled into M9 — see M9's note above).
+- Endpoint: `GET /assignments/sent` — assignments the caller has sent, filterable by status.
+- Read endpoints updated so the original creator retains read-only access to a task they no longer hold (FR-32) — currently a plain 404, since `TaskService.findOwnTaskOrThrow` only recognizes the current assignee.
+- Mobile: sent-assignments view; creator's read-only view of tasks they created but don't own.
+- Tests: integration tests confirming the creator can read but not write after handoff, and that sent-assignment history is visible to the sender regardless of status.
 
-**Exit criteria**: the full journey in PRODUCT.md ("assign → accept → scheduled") works exactly as described, with correct creator/assignee visibility on both sides.
+**Exit criteria**: the full journey in PRODUCT.md ("assign → accept → scheduled") has correct creator/assignee visibility on both sides, and a user can review the assignments they've sent regardless of outcome.
 
 ## M11 — Authorization & Edge-Case Hardening
 

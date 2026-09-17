@@ -31,7 +31,9 @@ const categorySchema = z
 
 // Wire format is always ISO 8601 UTC (ARCHITECTURE.md §3) — z.string().datetime()
 // defaults to requiring the trailing "Z" (no numeric offset), matching that.
-const isoDateTimeSchema = z
+// Exported so other schema modules (e.g. assignment.ts's accept request)
+// reuse the exact same rule rather than redefining it.
+export const isoDateTimeSchema = z
   .string()
   .datetime({ message: "Must be a valid ISO 8601 UTC date-time" });
 

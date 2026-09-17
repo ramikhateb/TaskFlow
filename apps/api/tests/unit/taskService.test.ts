@@ -29,7 +29,10 @@ function makeFakeUser(overrides: Partial<User> = {}): User {
 
 // A minimal, directly-settable pending assignment, for the FR-13/EC-5
 // freeze tests below — deliberately not built via assignmentService (which
-// taskService never depends on).
+// taskService never depends on). The embedded `task` is a structural
+// placeholder only: taskService's own logic never reads `.task` off a
+// pending assignment (only assignmentService's accept/Inbox mapping does),
+// so its exact contents don't matter here beyond satisfying the type.
 function makePendingAssignment(taskId: string): TaskAssignmentWithUsers {
   return {
     id: "assignment-1",
@@ -42,6 +45,21 @@ function makePendingAssignment(taskId: string): TaskAssignmentWithUsers {
     respondedAt: null,
     fromUser: makeFakeUser({ id: USER_A, name: "User A", username: "usera" }),
     toUser: makeFakeUser({ id: "recipient-1", name: "Recipient", username: "recipient" }),
+    task: {
+      id: taskId,
+      title: "Task",
+      description: null,
+      status: "TODO",
+      priority: "MEDIUM",
+      category: null,
+      scheduledAt: null,
+      deadline: null,
+      creatorId: USER_A,
+      assigneeId: USER_A,
+      completedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
   };
 }
 

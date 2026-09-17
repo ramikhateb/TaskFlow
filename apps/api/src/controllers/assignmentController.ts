@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
 import type {
+  AcceptTaskAssignmentRequest,
+  AssignmentIdRouteParam,
   CreateTaskAssignmentRequest,
   TaskAssignmentRouteParam,
   TaskIdRouteParam,
@@ -35,5 +37,28 @@ export function createAssignmentController(assignmentService: AssignmentService)
     res.status(200).json(result);
   });
 
-  return { create, cancel };
+  // M9 — mounted separately at "/assignments" (see routes/inboxRoutes.ts),
+  // addressed by assignmentId alone since these are recipient-scoped, not
+  // task-scoped, actions.
+  const decline = asyncHandler(async (req: Request, res: Response) => {
+    const { assignmentId } = req.params as unknown as AssignmentIdRouteParam;
+    const result = await assignmentService.declineAssignment(requireUserId(req), assignmentId);
+    res.status(200).json(result);
+  });
+
+  const accept = asyncHandler(async (req: Request, res: Response) => {
+    const { assignmentId } = req.params as unknown as AssignmentIdRouteParam;
+    const body = req.body as AcceptTaskAssignmentRequest;
+    const result = await assignmentService.acceptAssignment(requireUserId(req), assignmentId, body);
+    res.status(200).json(result);
+  });
+
+  const inbox = asyncHandler(async (req: Request, res: Response) => {
+    // No query params read here at all — the recipient is always the
+    // verified caller (req.user.id), never a client-supplied id (M9 spec).
+    const result = await assignmentService.getInbox(requireUserId(req));
+    res.status(200).json(result);
+  });
+
+  return { create, cancel, decline, accept, inbox };
 }

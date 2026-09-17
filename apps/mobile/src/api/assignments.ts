@@ -1,6 +1,9 @@
 import {
+  inboxResponseSchema,
   taskAssignmentResponseSchema,
+  type AcceptTaskAssignmentRequest,
   type CreateTaskAssignmentRequest,
+  type InboxResponse,
   type TaskAssignmentResponse,
 } from "@taskflow/shared";
 import { apiFetch } from "./client";
@@ -22,6 +25,36 @@ export async function cancelAssignmentRequest(
   assignmentId: string,
 ): Promise<TaskAssignmentResponse> {
   const data = await apiFetch<unknown>(`/tasks/${taskId}/assignments/${assignmentId}/cancel`, {
+    method: "POST",
+    auth: true,
+  });
+  return taskAssignmentResponseSchema.parse(data);
+}
+
+// M9: flat "/assignments" root, not nested under "/tasks/:taskId" like
+// create/cancel above — these are recipient-scoped, not task-scoped. See
+// docs/ARCHITECTURE.md §3.
+export async function getInboxRequest(): Promise<InboxResponse> {
+  const data = await apiFetch<unknown>("/assignments/inbox", { auth: true });
+  return inboxResponseSchema.parse(data);
+}
+
+export async function acceptAssignmentRequest(
+  assignmentId: string,
+  input: AcceptTaskAssignmentRequest,
+): Promise<TaskAssignmentResponse> {
+  const data = await apiFetch<unknown>(`/assignments/${assignmentId}/accept`, {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify(input),
+  });
+  return taskAssignmentResponseSchema.parse(data);
+}
+
+export async function declineAssignmentRequest(
+  assignmentId: string,
+): Promise<TaskAssignmentResponse> {
+  const data = await apiFetch<unknown>(`/assignments/${assignmentId}/decline`, {
     method: "POST",
     auth: true,
   });

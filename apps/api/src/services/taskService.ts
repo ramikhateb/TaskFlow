@@ -9,6 +9,7 @@ import type {
   UpdateTaskRequest,
 } from "@taskflow/shared";
 import { ConflictError, NotFoundError } from "../errors";
+import { isScheduleValid } from "../lib/scheduling";
 import { toAssignmentResponse } from "../mappers/assignmentResponse";
 import type { TaskAssignmentWithUsers } from "../repositories/taskAssignmentRepository";
 
@@ -86,15 +87,14 @@ export function isValidStatusTransition(from: TaskStatus, to: TaskStatus): boole
   return ALLOWED_TRANSITIONS[from].includes(to);
 }
 
-// FR-8/EC-13: scheduledAt and deadline are independent — either, both, or
-// neither may be set — but when both are present, deadline must be on or
-// after scheduledAt. Checked against the task's *resulting* complete state,
-// so a PATCH that touches only one of the two fields is validated against
+// FR-8/EC-13: checked against the task's *resulting* complete state, so a
+// PATCH that touches only one of scheduledAt/deadline is validated against
 // whichever value (new or already-stored) the other field currently holds.
-export function isScheduleValid(scheduledAt: Date | null, deadline: Date | null): boolean {
-  if (scheduledAt === null || deadline === null) return true;
-  return deadline.getTime() >= scheduledAt.getTime();
-}
+// The rule itself now lives in ../lib/scheduling (M9: assignmentService
+// needs it too, for validating the recipient's scheduling choice on
+// accept) — re-exported here so existing imports of `isScheduleValid` from
+// this module keep working unchanged.
+export { isScheduleValid } from "../lib/scheduling";
 
 // FR-14: scheduled-today ∪ due-today ∪ overdue, deduplicated. Centralized
 // here (per M5's "avoid slightly different definitions of today/overdue
