@@ -1,5 +1,7 @@
+import type { Task } from "@prisma/client";
 import { ConflictError, NotFoundError } from "../../src/errors";
 import {
+  classifyForToday,
   createTaskService,
   isScheduleValid,
   isValidStatusTransition,
@@ -13,6 +15,27 @@ function buildService() {
   const { tasks, taskRepository } = createFakeTaskRepository();
   const service = createTaskService({ taskRepository });
   return { service, tasks, taskRepository };
+}
+
+let taskCounter = 0;
+function makeTask(overrides: Partial<Task> = {}): Task {
+  taskCounter += 1;
+  return {
+    id: `task-${taskCounter}`,
+    title: `Task ${taskCounter}`,
+    description: null,
+    status: "TODO",
+    priority: "MEDIUM",
+    category: null,
+    scheduledAt: null,
+    deadline: null,
+    creatorId: USER_A,
+    assigneeId: USER_A,
+    completedAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  };
 }
 
 describe("isValidStatusTransition (product decision 2026-09-15)", () => {
@@ -67,6 +90,98 @@ describe("isScheduleValid (EC-13)", () => {
 
   it("is valid when neither is set", () => {
     expect(isScheduleValid(null, null)).toBe(true);
+  });
+});
+
+describe("classifyForToday (FR-14)", () => {
+  const NOW = new Date("2026-06-15T12:00:00.000Z");
+  const FROM = new Date("2026-06-15T00:00:00.000Z");
+  const TO = new Date("2026-06-16T00:00:00.000Z");
+
+  it("puts a task scheduled today in scheduledToday", () => {
+    const task = makeTask({ scheduledAt: new Date("2026-06-15T09:00:00.000Z") });
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.scheduledToday).toEqual([task]);
+    expect(result.overdue).toEqual([]);
+    expect(result.dueToday).toEqual([]);
+  });
+
+  it("excludes a task scheduled outside today", () => {
+    const before = makeTask({ scheduledAt: new Date("2026-06-14T09:00:00.000Z") });
+    const after = makeTask({ scheduledAt: new Date("2026-06-16T09:00:00.000Z") });
+    const result = classifyForToday([before, after], NOW, FROM, TO);
+    expect(result.scheduledToday).toEqual([]);
+    expect(result.dueToday).toEqual([]);
+    expect(result.overdue).toEqual([]);
+  });
+
+  it("puts a task due today (and not yet passed) in dueToday", () => {
+    const task = makeTask({ deadline: new Date("2026-06-15T18:00:00.000Z") });
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.dueToday).toEqual([task]);
+    expect(result.overdue).toEqual([]);
+  });
+
+  it("classifies an incomplete task with a passed deadline as overdue", () => {
+    const task = makeTask({ deadline: new Date("2026-06-10T00:00:00.000Z"), status: "TODO" });
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.overdue).toEqual([task]);
+    expect(result.scheduledToday).toEqual([]);
+    expect(result.dueToday).toEqual([]);
+  });
+
+  it("does not classify a DONE task as overdue even with a passed deadline", () => {
+    const task = makeTask({ deadline: new Date("2026-06-10T00:00:00.000Z"), status: "DONE" });
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.overdue).toEqual([]);
+  });
+
+  it("does not classify a CANCELLED task as overdue even with a passed deadline", () => {
+    const task = makeTask({ deadline: new Date("2026-06-10T00:00:00.000Z"), status: "CANCELLED" });
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.overdue).toEqual([]);
+    expect(result.scheduledToday).toEqual([]);
+    expect(result.dueToday).toEqual([]);
+  });
+
+  it("does not classify a task as overdue merely because scheduledAt has passed", () => {
+    const task = makeTask({
+      scheduledAt: new Date("2026-06-10T00:00:00.000Z"), // long past
+      deadline: new Date("2026-06-20T00:00:00.000Z"), // future — not overdue
+    });
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.overdue).toEqual([]);
+    expect(result.scheduledToday).toEqual([]);
+    expect(result.dueToday).toEqual([]);
+  });
+
+  it("places a task both scheduled and due today in exactly one bucket (scheduledToday)", () => {
+    const task = makeTask({
+      scheduledAt: new Date("2026-06-15T09:00:00.000Z"),
+      deadline: new Date("2026-06-15T18:00:00.000Z"),
+    });
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.scheduledToday).toEqual([task]);
+    expect(result.dueToday).toEqual([]);
+    expect(result.overdue).toEqual([]);
+  });
+
+  it("prioritizes overdue over scheduledToday for a task that is both", () => {
+    const task = makeTask({
+      scheduledAt: new Date("2026-06-15T09:00:00.000Z"), // today
+      deadline: new Date("2026-06-01T00:00:00.000Z"), // long past, incomplete
+    });
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.overdue).toEqual([task]);
+    expect(result.scheduledToday).toEqual([]);
+  });
+
+  it("ignores tasks with neither scheduledAt nor a relevant deadline", () => {
+    const task = makeTask();
+    const result = classifyForToday([task], NOW, FROM, TO);
+    expect(result.overdue).toEqual([]);
+    expect(result.scheduledToday).toEqual([]);
+    expect(result.dueToday).toEqual([]);
   });
 });
 
@@ -401,5 +516,116 @@ describe("taskService.deleteTask", () => {
     await expect(service.deleteTask(USER_A, "does-not-exist")).rejects.toBeInstanceOf(
       NotFoundError,
     );
+  });
+});
+
+describe("taskService.getToday", () => {
+  it("buckets scheduled-today, due-today, and overdue tasks, scoped to the caller", async () => {
+    const { service } = buildService();
+    const now = Date.now();
+    const from = new Date(now - 60 * 60 * 1000).toISOString();
+    const to = new Date(now + 60 * 60 * 1000).toISOString();
+
+    const scheduled = await service.createTask(USER_A, {
+      title: "Scheduled",
+      scheduledAt: new Date(now).toISOString(),
+    });
+    const due = await service.createTask(USER_A, {
+      title: "Due",
+      deadline: new Date(now + 30 * 60 * 1000).toISOString(),
+    });
+    const overdue = await service.createTask(USER_A, {
+      title: "Overdue",
+      deadline: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+    });
+    await service.createTask(USER_B, {
+      title: "Not mine",
+      scheduledAt: new Date(now).toISOString(),
+    });
+    await service.createTask(USER_A, { title: "Irrelevant, no dates" });
+
+    const result = await service.getToday(USER_A, { from, to });
+
+    expect(result.scheduledToday.map((t) => t.id)).toEqual([scheduled.id]);
+    expect(result.dueToday.map((t) => t.id)).toEqual([due.id]);
+    expect(result.overdue.map((t) => t.id)).toEqual([overdue.id]);
+  });
+
+  it("sorts scheduledToday chronologically", async () => {
+    const { service } = buildService();
+    const now = Date.now();
+    const from = new Date(now - 60 * 60 * 1000).toISOString();
+    const to = new Date(now + 6 * 60 * 60 * 1000).toISOString();
+
+    const later = await service.createTask(USER_A, {
+      title: "Later",
+      scheduledAt: new Date(now + 3 * 60 * 60 * 1000).toISOString(),
+    });
+    const earlier = await service.createTask(USER_A, {
+      title: "Earlier",
+      scheduledAt: new Date(now).toISOString(),
+    });
+
+    const result = await service.getToday(USER_A, { from, to });
+
+    expect(result.scheduledToday.map((t) => t.id)).toEqual([earlier.id, later.id]);
+  });
+
+  it("rejects an invalid range where to is not after from", async () => {
+    const { service } = buildService();
+    const now = new Date().toISOString();
+    // The service itself doesn't validate this (the shared Zod schema does,
+    // at the API boundary) — with from === to, the classification simply
+    // yields empty buckets rather than throwing.
+    const result = await service.getToday(USER_A, { from: now, to: now });
+    expect(result).toEqual({ overdue: [], scheduledToday: [], dueToday: [] });
+  });
+});
+
+describe("taskService.getSchedule", () => {
+  it("returns only the caller's tasks scheduled within the range, ordered chronologically", async () => {
+    const { service } = buildService();
+    const now = Date.now();
+    const from = new Date(now).toISOString();
+    const to = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+
+    const later = await service.createTask(USER_A, {
+      title: "Later",
+      scheduledAt: new Date(now + 12 * 60 * 60 * 1000).toISOString(),
+    });
+    const earlier = await service.createTask(USER_A, {
+      title: "Earlier",
+      scheduledAt: new Date(now + 1000).toISOString(),
+    });
+    await service.createTask(USER_A, {
+      title: "Outside range",
+      scheduledAt: new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    await service.createTask(USER_B, {
+      title: "Not mine",
+      scheduledAt: new Date(now + 1000).toISOString(),
+    });
+    await service.createTask(USER_A, { title: "Unscheduled" });
+
+    const result = await service.getSchedule(USER_A, { from, to });
+
+    expect(result.map((t) => t.id)).toEqual([earlier.id, later.id]);
+  });
+
+  it("excludes CANCELLED tasks from the schedule", async () => {
+    const { service } = buildService();
+    const now = Date.now();
+    const from = new Date(now).toISOString();
+    const to = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+
+    const created = await service.createTask(USER_A, {
+      title: "Cancelled",
+      scheduledAt: new Date(now + 1000).toISOString(),
+    });
+    await service.updateTask(USER_A, created.id, { status: "CANCELLED" });
+
+    const result = await service.getSchedule(USER_A, { from, to });
+
+    expect(result).toEqual([]);
   });
 });

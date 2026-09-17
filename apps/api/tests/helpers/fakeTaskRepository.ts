@@ -47,6 +47,27 @@ export function createFakeTaskRepository() {
       const [deleted] = tasks.splice(index, 1);
       return deleted!;
     },
+    async findRelevantForToday(assigneeId, from, to) {
+      return tasks.filter(
+        (t) =>
+          t.assigneeId === assigneeId &&
+          t.status !== "CANCELLED" &&
+          ((t.scheduledAt !== null && t.scheduledAt >= from && t.scheduledAt < to) ||
+            (t.deadline !== null && t.deadline < to)),
+      );
+    },
+    async findManyByAssigneeAndScheduledRange(assigneeId, from, to) {
+      return tasks
+        .filter(
+          (t) =>
+            t.assigneeId === assigneeId &&
+            t.status !== "CANCELLED" &&
+            t.scheduledAt !== null &&
+            t.scheduledAt >= from &&
+            t.scheduledAt < to,
+        )
+        .sort((a, b) => a.scheduledAt!.getTime() - b.scheduledAt!.getTime());
+    },
   };
 
   return { tasks, taskRepository };

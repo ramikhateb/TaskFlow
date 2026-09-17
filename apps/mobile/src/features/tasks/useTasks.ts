@@ -1,9 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CreateTaskRequest, TaskResponse, UpdateTaskRequest } from "@taskflow/shared";
+import type {
+  CreateTaskRequest,
+  DateRangeQuery,
+  TaskResponse,
+  UpdateTaskRequest,
+} from "@taskflow/shared";
 import {
   createTaskRequest,
   deleteTaskRequest,
+  getScheduleRequest,
   getTaskRequest,
+  getTodayRequest,
   listTasksRequest,
   updateTaskRequest,
 } from "../../api/tasks";
@@ -55,5 +62,22 @@ export function useDeleteTask() {
       queryClient.removeQueries({ queryKey: taskQueryKey(id) });
       queryClient.invalidateQueries({ queryKey: TASKS_QUERY_KEY });
     },
+  });
+}
+
+// Keyed on the exact range so switching days/ranges never mixes cached
+// results, and so a mutation elsewhere (invalidating the ["tasks"] prefix)
+// correctly invalidates these too.
+export function useToday(range: DateRangeQuery) {
+  return useQuery({
+    queryKey: [...TASKS_QUERY_KEY, "today", range.from, range.to] as const,
+    queryFn: () => getTodayRequest(range),
+  });
+}
+
+export function useSchedule(range: DateRangeQuery) {
+  return useQuery({
+    queryKey: [...TASKS_QUERY_KEY, "schedule", range.from, range.to] as const,
+    queryFn: async () => (await getScheduleRequest(range)).data,
   });
 }

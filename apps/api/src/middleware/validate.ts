@@ -7,7 +7,7 @@ import { ValidationError } from "../errors";
  * parsed (and defaulted/coerced) value. Everything past this middleware may
  * assume its input shape is already correct — per ARCHITECTURE.md §3.
  */
-function makeValidator(source: "body" | "params") {
+function makeValidator(source: "body" | "params" | "query") {
   return (schema: ZodTypeAny): RequestHandler =>
     (req: Request, _res: Response, next: NextFunction) => {
       const result = schema.safeParse(req[source]);
@@ -22,3 +22,4 @@ function makeValidator(source: "body" | "params") {
 
 export const validateBody = makeValidator("body");
 export const validateParams = makeValidator("params");
+export const validateQuery = makeValidator("query");

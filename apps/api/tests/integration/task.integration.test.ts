@@ -614,3 +614,229 @@ describe("DELETE /tasks/:id", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("GET /tasks/today", () => {
+  it("returns scheduled-today, due-today, and overdue tasks scoped to the caller", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const bob = await registerUser("bob@example.com", "Bob");
+    const now = Date.now();
+    const from = new Date(now - 60 * 60 * 1000).toISOString();
+    const to = new Date(now + 60 * 60 * 1000).toISOString();
+
+    const scheduled = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Scheduled", scheduledAt: new Date(now).toISOString() });
+    const due = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Due", deadline: new Date(now + 30 * 60 * 1000).toISOString() });
+    const overdue = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Overdue", deadline: new Date(now - 24 * 60 * 60 * 1000).toISOString() });
+    await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${bob.accessToken}`)
+      .send({ title: "Not mine", scheduledAt: new Date(now).toISOString() });
+
+    const res = await request(app)
+      .get(`/tasks/today?from=${from}&to=${to}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.scheduledToday.map((t: { id: string }) => t.id)).toEqual([scheduled.body.id]);
+    expect(res.body.dueToday.map((t: { id: string }) => t.id)).toEqual([due.body.id]);
+    expect(res.body.overdue.map((t: { id: string }) => t.id)).toEqual([overdue.body.id]);
+  });
+
+  it("does not classify a DONE task as overdue, and excludes CANCELLED entirely", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const now = Date.now();
+    const from = new Date(now - 60 * 60 * 1000).toISOString();
+    const to = new Date(now + 60 * 60 * 1000).toISOString();
+    const pastDeadline = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+
+    const done = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Done", deadline: pastDeadline });
+    await request(app)
+      .patch(`/tasks/${done.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ status: "DONE" });
+
+    const cancelled = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Cancelled", deadline: pastDeadline });
+    await request(app)
+      .patch(`/tasks/${cancelled.body.id}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ status: "CANCELLED" });
+
+    const res = await request(app)
+      .get(`/tasks/today?from=${from}&to=${to}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.overdue).toEqual([]);
+    // The DONE task is still deadline-relevant (deadline is in the past, before `to`)
+    // but must not appear as overdue; it's simply not returned in any bucket here
+    // since its deadline isn't within [from, to).
+    const allIds = [...res.body.overdue, ...res.body.scheduledToday, ...res.body.dueToday].map(
+      (t: { id: string }) => t.id,
+    );
+    expect(allIds).not.toContain(cancelled.body.id);
+  });
+
+  it("handles a task both scheduled and due today as a single item, not duplicated", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const now = Date.now();
+    const from = new Date(now - 60 * 60 * 1000).toISOString();
+    const to = new Date(now + 60 * 60 * 1000).toISOString();
+
+    const created = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({
+        title: "Both",
+        scheduledAt: new Date(now).toISOString(),
+        deadline: new Date(now + 30 * 60 * 1000).toISOString(),
+      });
+
+    const res = await request(app)
+      .get(`/tasks/today?from=${from}&to=${to}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    const allIds = [...res.body.overdue, ...res.body.scheduledToday, ...res.body.dueToday].map(
+      (t: { id: string }) => t.id,
+    );
+    expect(allIds.filter((id: string) => id === created.body.id)).toHaveLength(1);
+    expect(res.body.scheduledToday.map((t: { id: string }) => t.id)).toContain(created.body.id);
+  });
+
+  it("rejects a missing from/to with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const res = await request(app)
+      .get("/tasks/today")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects to <= from with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const now = new Date().toISOString();
+    const res = await request(app)
+      .get(`/tasks/today?from=${now}&to=${now}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects a malformed date parameter with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const res = await request(app)
+      .get("/tasks/today?from=not-a-date&to=also-not-a-date")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects an unauthenticated request with 401", async () => {
+    const res = await request(app).get(
+      "/tasks/today?from=2026-01-01T00:00:00.000Z&to=2026-01-02T00:00:00.000Z",
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("honors client-supplied local-day boundaries even when the UTC calendar date differs (EC-8)", async () => {
+    // A UTC-5 user's "June 15" local day runs 2026-06-15T05:00:00Z through
+    // 2026-06-16T05:00:00Z. A task at 2026-06-16T02:00:00Z is *UTC* June 16,
+    // but 21:00 local on June 15 — it must count as "today" for this user.
+    // A task one hour past the local boundary (2026-06-16T06:00:00Z) has the
+    // same UTC calendar date but belongs to the *next* local day and must
+    // NOT be included. If the server naively compared UTC date strings
+    // instead of the supplied instants, both would incorrectly get the same
+    // (wrong) treatment.
+    const alice = await registerUser("alice@example.com", "Alice");
+    const from = "2026-06-15T05:00:00.000Z";
+    const to = "2026-06-16T05:00:00.000Z";
+
+    const withinLocalDay = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Late local evening", scheduledAt: "2026-06-16T02:00:00.000Z" });
+    const nextLocalDay = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Next local day", scheduledAt: "2026-06-16T06:00:00.000Z" });
+
+    const res = await request(app)
+      .get(`/tasks/today?from=${from}&to=${to}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.status).toBe(200);
+    const scheduledIds = res.body.scheduledToday.map((t: { id: string }) => t.id);
+    expect(scheduledIds).toContain(withinLocalDay.body.id);
+    expect(scheduledIds).not.toContain(nextLocalDay.body.id);
+  });
+});
+
+describe("GET /tasks/schedule", () => {
+  it("returns only the caller's tasks scheduled within the range, ordered chronologically", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const bob = await registerUser("bob@example.com", "Bob");
+    const now = Date.now();
+    const from = new Date(now).toISOString();
+    const to = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+
+    const later = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Later", scheduledAt: new Date(now + 12 * 60 * 60 * 1000).toISOString() });
+    const earlier = await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({ title: "Earlier", scheduledAt: new Date(now + 1000).toISOString() });
+    await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`)
+      .send({
+        title: "Outside range",
+        scheduledAt: new Date(now + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+    await request(app)
+      .post("/tasks")
+      .set("Authorization", `Bearer ${bob.accessToken}`)
+      .send({ title: "Not mine", scheduledAt: new Date(now + 1000).toISOString() });
+
+    const res = await request(app)
+      .get(`/tasks/schedule?from=${from}&to=${to}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((t: { id: string }) => t.id)).toEqual([
+      earlier.body.id,
+      later.body.id,
+    ]);
+  });
+
+  it("rejects an invalid range (to <= from) with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const now = new Date().toISOString();
+    const res = await request(app)
+      .get(`/tasks/schedule?from=${now}&to=${now}`)
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects an unauthenticated request with 401", async () => {
+    const res = await request(app).get(
+      "/tasks/schedule?from=2026-01-01T00:00:00.000Z&to=2026-01-02T00:00:00.000Z",
+    );
+    expect(res.status).toBe(401);
+  });
+});

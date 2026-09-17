@@ -91,3 +91,32 @@ export const taskListResponseSchema = z.object({
   data: z.array(taskResponseSchema),
 });
 export type TaskListResponse = z.infer<typeof taskListResponseSchema>;
+
+// M5 (FR-14/FR-15/FR-17, EC-8): the server has no notion of the caller's
+// timezone, so both /tasks/today and /tasks/schedule require the client to
+// supply the boundary instants explicitly, as UTC ISO strings. For /tasks/today
+// these represent the device's local calendar day (midnight to midnight,
+// converted to UTC — see apps/mobile/src/features/tasks/dateBoundaries.ts);
+// for /tasks/schedule they're an arbitrary caller-chosen range. Same shape,
+// reused for both rather than duplicated, since the semantics (an inclusive
+// start / exclusive end UTC instant range) are identical.
+export const dateRangeQuerySchema = z
+  .object({
+    from: isoDateTimeSchema,
+    to: isoDateTimeSchema,
+  })
+  .refine((data) => new Date(data.to).getTime() > new Date(data.from).getTime(), {
+    message: "to must be after from",
+    path: ["to"],
+  });
+export type DateRangeQuery = z.infer<typeof dateRangeQuerySchema>;
+
+// FR-14: scheduled-today ∪ due-today ∪ overdue, deduplicated. A task never
+// appears in more than one bucket — see taskService.classifyForToday for the
+// precedence rule (overdue > scheduledToday > dueToday) that guarantees this.
+export const todayResponseSchema = z.object({
+  overdue: z.array(taskResponseSchema),
+  scheduledToday: z.array(taskResponseSchema),
+  dueToday: z.array(taskResponseSchema),
+});
+export type TodayResponse = z.infer<typeof todayResponseSchema>;

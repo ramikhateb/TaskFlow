@@ -1,5 +1,10 @@
 import type { Request, Response } from "express";
-import type { CreateTaskRequest, TaskIdParam, UpdateTaskRequest } from "@taskflow/shared";
+import type {
+  CreateTaskRequest,
+  DateRangeQuery,
+  TaskIdParam,
+  UpdateTaskRequest,
+} from "@taskflow/shared";
 import type { TaskService } from "../services/taskService";
 import { UnauthenticatedError } from "../errors";
 import { asyncHandler } from "../lib/asyncHandler";
@@ -46,5 +51,17 @@ export function createTaskController(taskService: TaskService) {
     res.status(204).send();
   });
 
-  return { list, create, getOne, update, remove };
+  const today = asyncHandler(async (req: Request, res: Response) => {
+    const range = req.query as unknown as DateRangeQuery;
+    const result = await taskService.getToday(requireUserId(req), range);
+    res.status(200).json(result);
+  });
+
+  const schedule = asyncHandler(async (req: Request, res: Response) => {
+    const range = req.query as unknown as DateRangeQuery;
+    const data = await taskService.getSchedule(requireUserId(req), range);
+    res.status(200).json({ data });
+  });
+
+  return { list, create, getOne, update, remove, today, schedule };
 }

@@ -1,5 +1,11 @@
 import type { Task, TaskPriority, TaskStatus } from "@prisma/client";
-import type { CreateTaskRequest, TaskResponse, UpdateTaskRequest } from "@taskflow/shared";
+import type {
+  CreateTaskRequest,
+  DateRangeQuery,
+  TaskResponse,
+  TodayResponse,
+  UpdateTaskRequest,
+} from "@taskflow/shared";
 import { ConflictError, NotFoundError } from "../errors";
 
 // Narrow interface (matching the repository module's shape) so this service
@@ -31,6 +37,8 @@ export interface TaskRepository {
     }>,
   ): Promise<Task>;
   deleteById(id: string): Promise<Task>;
+  findRelevantForToday(assigneeId: string, from: Date, to: Date): Promise<Task[]>;
+  findManyByAssigneeAndScheduledRange(assigneeId: string, from: Date, to: Date): Promise<Task[]>;
 }
 
 export interface TaskServiceDeps {
@@ -61,6 +69,62 @@ export function isValidStatusTransition(from: TaskStatus, to: TaskStatus): boole
 export function isScheduleValid(scheduledAt: Date | null, deadline: Date | null): boolean {
   if (scheduledAt === null || deadline === null) return true;
   return deadline.getTime() >= scheduledAt.getTime();
+}
+
+// FR-14: scheduled-today ∪ due-today ∪ overdue, deduplicated. Centralized
+// here (per M5's "avoid slightly different definitions of today/overdue
+// across components") — the single source of truth for all three
+// definitions, unit-testable in isolation with plain constructed tasks.
+//
+// Buckets are mutually exclusive by construction (overdue > scheduledToday >
+// dueToday precedence), which is what "deduplicated" means in practice: a
+// task that's both scheduled and due today, or overdue and also scheduled
+// today, appears exactly once, in the highest-precedence bucket, carrying
+// both its scheduledAt and deadline so the UI can still show both facts.
+//
+// CANCELLED tasks never appear (no planning value once cancelled). DONE
+// tasks are excluded only from `overdue` (FR-12/FR-14: overdue explicitly
+// requires the task not be DONE or CANCELLED) — a completed task that's
+// scheduled/due today still appears in its natural bucket, left to the UI to
+// render as completed (e.g. struck through), not hidden.
+export function classifyForToday(
+  tasks: Task[],
+  now: Date,
+  from: Date,
+  to: Date,
+): { overdue: Task[]; scheduledToday: Task[]; dueToday: Task[] } {
+  const overdue: Task[] = [];
+  const scheduledToday: Task[] = [];
+  const dueToday: Task[] = [];
+
+  const isWithin = (date: Date, start: Date, end: Date) =>
+    date.getTime() >= start.getTime() && date.getTime() < end.getTime();
+
+  for (const task of tasks) {
+    if (task.status === "CANCELLED") continue;
+
+    const isOverdue =
+      task.status !== "DONE" && task.deadline !== null && task.deadline.getTime() < now.getTime();
+    if (isOverdue) {
+      overdue.push(task);
+      continue;
+    }
+
+    if (task.scheduledAt !== null && isWithin(task.scheduledAt, from, to)) {
+      scheduledToday.push(task);
+      continue;
+    }
+
+    if (task.deadline !== null && isWithin(task.deadline, from, to)) {
+      dueToday.push(task);
+    }
+  }
+
+  return { overdue, scheduledToday, dueToday };
+}
+
+function sortByField(tasks: Task[], field: "scheduledAt" | "deadline"): Task[] {
+  return [...tasks].sort((a, b) => (a[field]?.getTime() ?? 0) - (b[field]?.getTime() ?? 0));
 }
 
 function toTaskResponse(task: Task): TaskResponse {
@@ -180,7 +244,34 @@ export function createTaskService({ taskRepository }: TaskServiceDeps) {
     await taskRepository.deleteById(taskId);
   }
 
-  return { listOwnTasks, createTask, getTask, updateTask, deleteTask };
+  async function getToday(userId: string, range: DateRangeQuery): Promise<TodayResponse> {
+    const from = new Date(range.from);
+    const to = new Date(range.to);
+
+    const candidates = await taskRepository.findRelevantForToday(userId, from, to);
+    const { overdue, scheduledToday, dueToday } = classifyForToday(
+      candidates,
+      new Date(),
+      from,
+      to,
+    );
+
+    return {
+      overdue: sortByField(overdue, "deadline").map(toTaskResponse),
+      scheduledToday: sortByField(scheduledToday, "scheduledAt").map(toTaskResponse),
+      dueToday: sortByField(dueToday, "deadline").map(toTaskResponse),
+    };
+  }
+
+  async function getSchedule(userId: string, range: DateRangeQuery): Promise<TaskResponse[]> {
+    const from = new Date(range.from);
+    const to = new Date(range.to);
+
+    const tasks = await taskRepository.findManyByAssigneeAndScheduledRange(userId, from, to);
+    return tasks.map(toTaskResponse); // already ordered by scheduledAt asc (FR-15)
+  }
+
+  return { listOwnTasks, createTask, getTask, updateTask, deleteTask, getToday, getSchedule };
 }
 
 export type TaskService = ReturnType<typeof createTaskService>;

@@ -1,13 +1,14 @@
 import { Router } from "express";
 import {
   createTaskRequestSchema,
+  dateRangeQuerySchema,
   taskIdParamSchema,
   updateTaskRequestSchema,
 } from "@taskflow/shared";
 import type { Env } from "../env";
 import { createTaskController } from "../controllers/taskController";
 import { requireAuth } from "../middleware/auth";
-import { validateBody, validateParams } from "../middleware/validate";
+import { validateBody, validateParams, validateQuery } from "../middleware/validate";
 import * as taskRepository from "../repositories/taskRepository";
 import { createTaskService } from "../services/taskService";
 
@@ -21,6 +22,10 @@ export function createTaskRoutes(env: Env): Router {
 
   router.get("/", controller.list);
   router.post("/", validateBody(createTaskRequestSchema), controller.create);
+  // Must be registered before "/:id" — otherwise Express would match
+  // "today"/"schedule" as an :id value.
+  router.get("/today", validateQuery(dateRangeQuerySchema), controller.today);
+  router.get("/schedule", validateQuery(dateRangeQuerySchema), controller.schedule);
   router.get("/:id", validateParams(taskIdParamSchema), controller.getOne);
   router.patch(
     "/:id",

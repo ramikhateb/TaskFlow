@@ -45,3 +45,37 @@ export function update(
 export function deleteById(id: string): Promise<Task> {
   return prisma.task.delete({ where: { id } });
 }
+
+/**
+ * Candidate set for the Today view (FR-14): CANCELLED tasks are excluded
+ * entirely (never useful for planning), and everything with a scheduledAt in
+ * [from, to) or a deadline before `to` is fetched — the latter deliberately
+ * unbounded below so old overdue tasks aren't missed. Actual bucket
+ * classification (overdue vs. scheduled-today vs. due-today) is business
+ * logic and happens in taskService.classifyForToday, not here.
+ */
+export function findRelevantForToday(assigneeId: string, from: Date, to: Date): Promise<Task[]> {
+  return prisma.task.findMany({
+    where: {
+      assigneeId,
+      status: { not: "CANCELLED" },
+      OR: [{ scheduledAt: { gte: from, lt: to } }, { deadline: { lt: to } }],
+    },
+  });
+}
+
+/** Schedule view (FR-15): own tasks with scheduledAt in [from, to), chronological. */
+export function findManyByAssigneeAndScheduledRange(
+  assigneeId: string,
+  from: Date,
+  to: Date,
+): Promise<Task[]> {
+  return prisma.task.findMany({
+    where: {
+      assigneeId,
+      status: { not: "CANCELLED" },
+      scheduledAt: { gte: from, lt: to },
+    },
+    orderBy: { scheduledAt: "asc" },
+  });
+}
