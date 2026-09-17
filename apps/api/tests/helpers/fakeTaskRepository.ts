@@ -13,8 +13,18 @@ export function createFakeTaskRepository() {
     async findById(id) {
       return tasks.find((t) => t.id === id) ?? null;
     },
-    async findManyByAssignee(assigneeId) {
-      return tasks.filter((t) => t.assigneeId === assigneeId);
+    async findManyByAssignee(assigneeId, filters = {}) {
+      const q = filters.q?.toLowerCase();
+      return tasks.filter(
+        (t) =>
+          t.assigneeId === assigneeId &&
+          (!filters.status || t.status === filters.status) &&
+          (!filters.priority || t.priority === filters.priority) &&
+          (!filters.category || t.category === filters.category) &&
+          (!q ||
+            t.title.toLowerCase().includes(q) ||
+            (t.description !== null && t.description.toLowerCase().includes(q))),
+      );
     },
     async create(data) {
       const task: Task = {

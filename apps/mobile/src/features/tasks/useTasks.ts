@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CreateTaskRequest,
   DateRangeQuery,
+  ListTasksQuery,
   TaskResponse,
   UpdateTaskRequest,
 } from "@taskflow/shared";
@@ -18,11 +19,47 @@ import {
 export const TASKS_QUERY_KEY = ["tasks"] as const;
 export const taskQueryKey = (id: string) => ["tasks", id] as const;
 
-export function useTasks() {
+// Flat primitives in the key (not the filters object itself) so cache
+// identity is unambiguous and matches the existing convention used by
+// useToday/useSchedule below. Different filter combinations never share a
+// cache entry; the same combination always does.
+export function useTasks(filters: ListTasksQuery = {}) {
   return useQuery({
-    queryKey: TASKS_QUERY_KEY,
-    queryFn: async () => (await listTasksRequest()).data,
+    queryKey: [
+      ...TASKS_QUERY_KEY,
+      "list",
+      filters.status ?? null,
+      filters.priority ?? null,
+      filters.category ?? null,
+      filters.q ?? null,
+    ] as const,
+    queryFn: async () => (await listTasksRequest(filters)).data,
   });
+}
+
+/**
+ * Available categories for the filter picker. Deliberately queries with NO
+ * filters applied (its own cache entry, decoupled from whatever the Tasks
+ * screen's active filters are) rather than deriving options from the
+ * currently-filtered list — if it read from the filtered result, selecting
+ * any one category would make every *other* category vanish from the
+ * picker, since the filtered response no longer contains tasks in them.
+ * Tradeoff: this can be briefly stale relative to the very latest edits
+ * until its cache revalidates, and — when filters are active — it costs a
+ * second lightweight GET /tasks. Both are acceptable for a filter-picker
+ * over a personal task list; a dedicated /tasks/categories endpoint was
+ * deliberately not added (M6 keeps one composable list endpoint).
+ * When no filters are active, this is the exact same query as the main
+ * list, so TanStack Query serves it from one shared cache entry — no extra
+ * request in the common case.
+ */
+export function useAvailableCategories(): string[] {
+  const allTasks = useTasks({});
+  const categories = new Set<string>();
+  for (const task of allTasks.data ?? []) {
+    if (task.category) categories.add(task.category);
+  }
+  return Array.from(categories).sort((a, b) => a.localeCompare(b));
 }
 
 export function useTask(id: string) {

@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import type {
   CreateTaskRequest,
   DateRangeQuery,
+  ListTasksQuery,
   TaskIdParam,
   UpdateTaskRequest,
 } from "@taskflow/shared";
@@ -20,7 +21,8 @@ function requireUserId(req: Request): string {
 // the HTTP response. No business-rule branching here (ARCHITECTURE.md §3).
 export function createTaskController(taskService: TaskService) {
   const list = asyncHandler(async (req: Request, res: Response) => {
-    const tasks = await taskService.listOwnTasks(requireUserId(req));
+    const filters = req.query as unknown as ListTasksQuery;
+    const tasks = await taskService.listOwnTasks(requireUserId(req), filters);
     res.status(200).json({ data: tasks });
   });
 

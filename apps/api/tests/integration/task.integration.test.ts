@@ -243,6 +243,227 @@ describe("GET /tasks", () => {
   });
 });
 
+describe("GET /tasks — search and filters (M6, FR-16)", () => {
+  async function seed(token: string) {
+    const create = (body: Record<string, unknown>) =>
+      request(app).post("/tasks").set("Authorization", `Bearer ${token}`).send(body);
+
+    const report = await create({
+      title: "Write quarterly report",
+      priority: "HIGH",
+      category: "Work",
+    });
+    await create({ title: "Buy groceries", priority: "LOW", category: "Home" });
+    const descMatch = await create({
+      title: "Untitled",
+      description: "Includes a report reference",
+      priority: "MEDIUM",
+      category: "Work",
+    });
+    const done = await create({ title: "Old report archive", category: "Work" });
+    await request(app)
+      .patch(`/tasks/${done.body.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "DONE" });
+
+    return { report: report.body, descMatch: descMatch.body, done: done.body };
+  }
+
+  it("searches by title (case-insensitive, trimmed)", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const { report } = await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?q=  REPORT  ")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.status).toBe(200);
+    const ids = res.body.data.map((t: { id: string }) => t.id);
+    expect(ids).toContain(report.id);
+  });
+
+  it("searches by description", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const { descMatch } = await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?q=report")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.body.data.map((t: { id: string }) => t.id)).toContain(descMatch.id);
+  });
+
+  it("treats an empty/whitespace-only q as no search", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?q=%20%20")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("filters by status", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const { done } = await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?status=DONE")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.body.data.map((t: { id: string }) => t.id)).toEqual([done.id]);
+  });
+
+  it("rejects an invalid status with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const res = await request(app)
+      .get("/tasks?status=NOT_A_STATUS")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("filters by priority", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const { report } = await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?priority=HIGH")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.body.data.map((t: { id: string }) => t.id)).toEqual([report.id]);
+  });
+
+  it("rejects an invalid priority with 400 VALIDATION_ERROR", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const res = await request(app)
+      .get("/tasks?priority=URGENT")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("filters by category", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?category=Work")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.body.data.every((t: { category: string }) => t.category === "Work")).toBe(true);
+    expect(res.body.data.length).toBe(3);
+  });
+
+  it("combines status + category with AND semantics", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const { done } = await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?status=DONE&category=Work")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.body.data.map((t: { id: string }) => t.id)).toEqual([done.id]);
+  });
+
+  it("combines status + priority + category + q with AND semantics", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const { report } = await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?status=TODO&priority=HIGH&category=Work&q=report")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.body.data.map((t: { id: string }) => t.id)).toEqual([report.id]);
+  });
+
+  it("combines q + priority together", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const { report } = await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?q=report&priority=HIGH")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.body.data.map((t: { id: string }) => t.id)).toEqual([report.id]);
+  });
+
+  it("returns an empty array when no task matches", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    await seed(alice.accessToken);
+
+    const res = await request(app)
+      .get("/tasks?q=nonexistent-term-xyz")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  it("never returns another user's tasks through search, category, status, priority, or combinations", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const bob = await registerUser("bob@example.com", "Bob");
+    const { report } = await seed(bob.accessToken); // all of Bob's data
+
+    const searches = [
+      "/tasks?q=report",
+      "/tasks?category=Work",
+      "/tasks?status=TODO",
+      "/tasks?priority=HIGH",
+      "/tasks?status=TODO&priority=HIGH&category=Work&q=report",
+    ];
+
+    for (const path of searches) {
+      const res = await request(app).get(path).set("Authorization", `Bearer ${alice.accessToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+      expect(res.body.data.map((t: { id: string }) => t.id)).not.toContain(report.id);
+    }
+  });
+
+  it("clearing one filter preserves the effect of the others", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    const create = (body: Record<string, unknown>) =>
+      request(app).post("/tasks").set("Authorization", `Bearer ${alice.accessToken}`).send(body);
+
+    const reportTask = await create({ title: "Write report", category: "Work" });
+    const otherWorkTask = await create({ title: "Unrelated work item", category: "Work" });
+    await create({ title: "Write report", category: "Home" }); // wrong category
+    await create({ title: "Unrelated home item", category: "Home" }); // matches neither
+
+    // status=TODO & category=Work & q=report -> only reportTask.
+    const narrow = await request(app)
+      .get("/tasks?status=TODO&category=Work&q=report")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(narrow.body.data.map((t: { id: string }) => t.id)).toEqual([reportTask.body.id]);
+
+    // Drop q — status=TODO & category=Work now also includes otherWorkTask.
+    const widened = await request(app)
+      .get("/tasks?status=TODO&category=Work")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    const widenedIds = widened.body.data.map((t: { id: string }) => t.id);
+    expect(widenedIds).toContain(reportTask.body.id);
+    expect(widenedIds).toContain(otherWorkTask.body.id);
+  });
+
+  it("clearing all filters restores the full unfiltered list", async () => {
+    const alice = await registerUser("alice@example.com", "Alice");
+    await seed(alice.accessToken);
+
+    const filtered = await request(app)
+      .get("/tasks?status=DONE")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(filtered.body.data).toHaveLength(1);
+
+    const all = await request(app)
+      .get("/tasks")
+      .set("Authorization", `Bearer ${alice.accessToken}`);
+    expect(all.body.data).toHaveLength(4);
+  });
+});
+
 describe("GET /tasks/:id", () => {
   it("returns the task to its owner", async () => {
     const alice = await registerUser("alice@example.com", "Alice");

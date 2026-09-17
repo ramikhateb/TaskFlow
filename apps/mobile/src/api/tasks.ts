@@ -4,6 +4,7 @@ import {
   todayResponseSchema,
   type CreateTaskRequest,
   type DateRangeQuery,
+  type ListTasksQuery,
   type TaskListResponse,
   type TaskResponse,
   type TodayResponse,
@@ -11,8 +12,15 @@ import {
 } from "@taskflow/shared";
 import { apiFetch } from "./client";
 
-export async function listTasksRequest(): Promise<TaskListResponse> {
-  const data = await apiFetch<unknown>("/tasks", { auth: true });
+export async function listTasksRequest(filters: ListTasksQuery = {}): Promise<TaskListResponse> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.priority) params.set("priority", filters.priority);
+  if (filters.category) params.set("category", filters.category);
+  if (filters.q) params.set("q", filters.q);
+  const query = params.toString();
+
+  const data = await apiFetch<unknown>(`/tasks${query ? `?${query}` : ""}`, { auth: true });
   return taskListResponseSchema.parse(data);
 }
 

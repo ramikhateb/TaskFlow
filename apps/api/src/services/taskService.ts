@@ -2,6 +2,7 @@ import type { Task, TaskPriority, TaskStatus } from "@prisma/client";
 import type {
   CreateTaskRequest,
   DateRangeQuery,
+  ListTasksQuery,
   TaskResponse,
   TodayResponse,
   UpdateTaskRequest,
@@ -10,9 +11,16 @@ import { ConflictError, NotFoundError } from "../errors";
 
 // Narrow interface (matching the repository module's shape) so this service
 // can be unit tested against a fake, with no Prisma import here at all.
+export interface TaskListFilters {
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  category?: string;
+  q?: string;
+}
+
 export interface TaskRepository {
   findById(id: string): Promise<Task | null>;
-  findManyByAssignee(assigneeId: string): Promise<Task[]>;
+  findManyByAssignee(assigneeId: string, filters?: TaskListFilters): Promise<Task[]>;
   create(data: {
     title: string;
     description: string | null;
@@ -160,8 +168,15 @@ export function createTaskService({ taskRepository }: TaskServiceDeps) {
     return task;
   }
 
-  async function listOwnTasks(userId: string): Promise<TaskResponse[]> {
-    const tasks = await taskRepository.findManyByAssignee(userId);
+  // Filters are already validated/normalized by listTasksQuerySchema at the
+  // API boundary (ARCHITECTURE.md §3) — this just forwards them to the
+  // repository query. No interpretation happens here or in the controller,
+  // so there's exactly one place search/filter semantics are decided.
+  async function listOwnTasks(
+    userId: string,
+    filters: ListTasksQuery = {},
+  ): Promise<TaskResponse[]> {
+    const tasks = await taskRepository.findManyByAssignee(userId, filters);
     return tasks.map(toTaskResponse);
   }
 

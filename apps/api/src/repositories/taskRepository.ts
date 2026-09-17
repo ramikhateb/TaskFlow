@@ -5,10 +5,40 @@ export function findById(id: string): Promise<Task | null> {
   return prisma.task.findUnique({ where: { id } });
 }
 
-/** Own tasks, per FR-16: keyed by assigneeId, the current responsible party. */
-export function findManyByAssignee(assigneeId: string): Promise<Task[]> {
+export interface TaskListFilters {
+  status?: Task["status"];
+  priority?: Task["priority"];
+  /** Exact match, per REQUIREMENTS.md EC-12 — category has no fixed vocabulary. */
+  category?: string;
+  /** Case-insensitive substring match against title OR description. */
+  q?: string;
+}
+
+/**
+ * Own tasks, per FR-16: keyed by assigneeId, the current responsible party.
+ * All filters are applied in the query itself (never fetch-then-filter in
+ * JS) and combine with AND — Prisma ANDs sibling `where` keys by default, so
+ * `status`/`priority`/`category` each narrow independently, while `q`'s
+ * title-OR-description match is scoped inside its own `OR` array rather than
+ * widening the whole query.
+ */
+export function findManyByAssignee(
+  assigneeId: string,
+  filters: TaskListFilters = {},
+): Promise<Task[]> {
   return prisma.task.findMany({
-    where: { assigneeId },
+    where: {
+      assigneeId,
+      ...(filters.status && { status: filters.status }),
+      ...(filters.priority && { priority: filters.priority }),
+      ...(filters.category && { category: filters.category }),
+      ...(filters.q && {
+        OR: [
+          { title: { contains: filters.q, mode: "insensitive" } },
+          { description: { contains: filters.q, mode: "insensitive" } },
+        ],
+      }),
+    },
     orderBy: { createdAt: "desc" },
   });
 }

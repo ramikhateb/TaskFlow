@@ -1,4 +1,5 @@
 import type { Task } from "@prisma/client";
+import { listTasksQuerySchema } from "@taskflow/shared";
 import { ConflictError, NotFoundError } from "../../src/errors";
 import {
   classifyForToday,
@@ -292,6 +293,129 @@ describe("taskService.listOwnTasks", () => {
   it("returns an empty list for a user with no tasks", async () => {
     const { service } = buildService();
     await expect(service.listOwnTasks(USER_A)).resolves.toEqual([]);
+  });
+});
+
+describe("taskService.listOwnTasks — search and filters (M6, FR-16)", () => {
+  it("matches a search term in the title", async () => {
+    const { service } = buildService();
+    const match = await service.createTask(USER_A, { title: "Write quarterly report" });
+    await service.createTask(USER_A, { title: "Buy groceries" });
+
+    const result = await service.listOwnTasks(USER_A, { q: "report" });
+
+    expect(result.map((t) => t.id)).toEqual([match.id]);
+  });
+
+  it("matches a search term in the description", async () => {
+    const { service } = buildService();
+    const match = await service.createTask(USER_A, {
+      title: "Task A",
+      description: "Includes the quarterly report",
+    });
+    await service.createTask(USER_A, { title: "Task B", description: "Nothing relevant" });
+
+    const result = await service.listOwnTasks(USER_A, { q: "report" });
+
+    expect(result.map((t) => t.id)).toEqual([match.id]);
+  });
+
+  it("matches case-insensitively", async () => {
+    const { service } = buildService();
+    const match = await service.createTask(USER_A, { title: "URGENT REPORT" });
+
+    const result = await service.listOwnTasks(USER_A, { q: "report" });
+
+    expect(result.map((t) => t.id)).toEqual([match.id]);
+  });
+
+  it("treats a whitespace-only query as no search", async () => {
+    const { service } = buildService();
+    await service.createTask(USER_A, { title: "Task A" });
+    await service.createTask(USER_A, { title: "Task B" });
+
+    // The whitespace-collapses-to-undefined behavior lives in the shared
+    // Zod schema (the API boundary) — exercise it for real rather than
+    // hand-constructing a value the schema would never actually produce.
+    const filters = listTasksQuerySchema.parse({ q: "   " });
+    const result = await service.listOwnTasks(USER_A, filters);
+
+    expect(result).toHaveLength(2);
+  });
+
+  it("filters by status", async () => {
+    const { service } = buildService();
+    await service.createTask(USER_A, { title: "Todo task" });
+    const done = await service.createTask(USER_A, { title: "Done task" });
+    await service.updateTask(USER_A, done.id, { status: "DONE" });
+
+    const result = await service.listOwnTasks(USER_A, { status: "DONE" });
+
+    expect(result.map((t) => t.id)).toEqual([done.id]);
+  });
+
+  it("filters by priority", async () => {
+    const { service } = buildService();
+    const high = await service.createTask(USER_A, { title: "High", priority: "HIGH" });
+    await service.createTask(USER_A, { title: "Low", priority: "LOW" });
+
+    const result = await service.listOwnTasks(USER_A, { priority: "HIGH" });
+
+    expect(result.map((t) => t.id)).toEqual([high.id]);
+  });
+
+  it("filters by category (exact match)", async () => {
+    const { service } = buildService();
+    const work = await service.createTask(USER_A, { title: "Work task", category: "Work" });
+    await service.createTask(USER_A, { title: "Home task", category: "Home" });
+
+    const result = await service.listOwnTasks(USER_A, { category: "Work" });
+
+    expect(result.map((t) => t.id)).toEqual([work.id]);
+  });
+
+  it("combines status, priority, category, and q with AND semantics", async () => {
+    const { service } = buildService();
+    const target = await service.createTask(USER_A, {
+      title: "Write report",
+      priority: "HIGH",
+      category: "Work",
+    });
+    // Each of these matches exactly one of the four filters, none matches all.
+    await service.createTask(USER_A, { title: "Write report", priority: "LOW", category: "Work" });
+    await service.createTask(USER_A, { title: "Write report", priority: "HIGH", category: "Home" });
+    await service.createTask(USER_A, { title: "Buy milk", priority: "HIGH", category: "Work" });
+
+    const result = await service.listOwnTasks(USER_A, {
+      status: "TODO",
+      priority: "HIGH",
+      category: "Work",
+      q: "report",
+    });
+
+    expect(result.map((t) => t.id)).toEqual([target.id]);
+  });
+
+  it("returns an empty list when nothing matches", async () => {
+    const { service } = buildService();
+    await service.createTask(USER_A, { title: "Task A" });
+
+    const result = await service.listOwnTasks(USER_A, { q: "does-not-exist" });
+
+    expect(result).toEqual([]);
+  });
+
+  it("never returns another user's tasks, with or without filters", async () => {
+    const { service } = buildService();
+    await service.createTask(USER_B, { title: "Report", priority: "HIGH", category: "Work" });
+
+    const result = await service.listOwnTasks(USER_A, {
+      priority: "HIGH",
+      category: "Work",
+      q: "report",
+    });
+
+    expect(result).toEqual([]);
   });
 });
 

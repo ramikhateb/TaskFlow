@@ -120,3 +120,25 @@ export const todayResponseSchema = z.object({
   dueToday: z.array(taskResponseSchema),
 });
 export type TodayResponse = z.infer<typeof todayResponseSchema>;
+
+// M6 (FR-16): GET /tasks list filters, all optional and AND-combined —
+// omitting all of them is exactly today's unfiltered "list my own tasks".
+// category/q tolerate an empty/whitespace value (e.g. a UI control reset to
+// "" rather than omitted) by collapsing it to "no filter" rather than a 400,
+// which is what makes "clear this one filter" a no-op-safe request to send.
+// status/priority stay strict enums — an invalid value is always a genuine
+// client error, never something to silently ignore.
+const optionalTrimmedString = () =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => (value === "" ? undefined : value));
+
+export const listTasksQuerySchema = z.object({
+  status: taskStatusSchema.optional(),
+  priority: taskPrioritySchema.optional(),
+  category: optionalTrimmedString(),
+  q: optionalTrimmedString(),
+});
+export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;

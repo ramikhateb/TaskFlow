@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   createTaskRequestSchema,
   dateRangeQuerySchema,
+  listTasksQuerySchema,
   taskIdParamSchema,
   updateTaskRequestSchema,
 } from "@taskflow/shared";
@@ -20,7 +21,7 @@ export function createTaskRoutes(env: Env): Router {
   // Every task route requires authentication (ARCHITECTURE.md §3).
   router.use(requireAuth(env));
 
-  router.get("/", controller.list);
+  router.get("/", validateQuery(listTasksQuerySchema), controller.list);
   router.post("/", validateBody(createTaskRequestSchema), controller.create);
   // Must be registered before "/:id" — otherwise Express would match
   // "today"/"schedule" as an :id value.
