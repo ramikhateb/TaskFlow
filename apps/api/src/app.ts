@@ -5,6 +5,7 @@ import type { Env } from "./env";
 import { errorHandler } from "./middleware/errorHandler";
 import { createAuthRoutes } from "./routes/authRoutes";
 import { createTaskRoutes } from "./routes/taskRoutes";
+import { createUserRoutes } from "./routes/userRoutes";
 
 export function createApp(env: Env): Express {
   const app = express();
@@ -22,6 +23,7 @@ export function createApp(env: Env): Express {
 
   app.use("/auth", createAuthRoutes(env));
   app.use("/tasks", createTaskRoutes(env));
+  app.use("/users", createUserRoutes(env));
 
   // Must be registered after all routes.
   app.use(errorHandler);

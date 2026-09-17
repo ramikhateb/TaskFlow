@@ -27,6 +27,7 @@ v1 targets pairs of people who already know each other and are both TaskFlow use
 - **Inbox** — where a user reviews assignments sent to them that are awaiting a decision.
 - **Today view** — the tasks a user should be looking at today: assigned-to-them tasks scheduled for today, due today, or overdue.
 - **Schedule view** — a user's tasks organized across future dates, for planning ahead.
+- **Username** — a unique, public handle (e.g. `@ramikhateb`) used to find and be found by other users for collaboration. Distinct from email, which is private and used only to sign in — email is never searchable or shown to other users.
 
 ## Core User Journeys
 
@@ -43,7 +44,7 @@ A user opens the Schedule view to see and organize tasks across upcoming dates, 
 A user searches their tasks by keyword and narrows the list by status, priority, or category.
 
 ### 5. Find another user
-A user searches for another TaskFlow user by name or email, in order to assign them a task.
+A user searches for another TaskFlow user by name or username (with or without the `@`), in order to assign them a task. Email is a private sign-in credential, never a way to find someone.
 
 ### 6. Assign a task to another user
 A user creates or selects a task and assigns it to another TaskFlow user found via search. The task is not placed on the recipient's schedule — it becomes a pending assignment visible to both people, and the original assignee remains responsible for it, unchanged, while the recipient decides.
@@ -56,11 +57,11 @@ After accepting, the recipient — not the assigner — chooses the task's sched
 
 ## v1 Scope
 
-- Email/password authentication.
+- Email/password authentication; a unique username as the separate public identity used for discovery.
 - Full CRUD + complete on personal tasks, with title, description, priority, category, scheduled date/time, deadline, and status.
 - Today view and Schedule view.
 - Search and filter across a user's own tasks.
-- Search for other users by name/email.
+- Search for other users by name/username (never by email).
 - Assigning a task to exactly one other user, with an Inbox for accept/decline.
 - On acceptance, the assignee sets the task's scheduled date/time; the deadline persists from creation.
 - Clear, persistent distinction between a task's creator and its current assignee.

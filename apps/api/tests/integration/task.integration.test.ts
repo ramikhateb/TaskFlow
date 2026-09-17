@@ -21,9 +21,15 @@ afterAll(async () => {
 });
 
 async function registerUser(email: string, name: string) {
+  // Username derived from the email local-part — M7 requires one, and
+  // these tests only ever care about the returned session, not the handle.
+  const username = email
+    .split("@")[0]!
+    .toLowerCase()
+    .replace(/[^a-z0-9_.]/g, "");
   const res = await request(app)
     .post("/auth/register")
-    .send({ email, password: "password1", name });
+    .send({ email, password: "password1", name, username });
   return { accessToken: res.body.accessToken as string, userId: res.body.user.id as string };
 }
 

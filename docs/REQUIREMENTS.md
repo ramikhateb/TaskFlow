@@ -6,12 +6,13 @@ Scope: v1, as defined in [PRODUCT.md](./PRODUCT.md). Anything not listed here is
 
 ### 1.1 Authentication & Accounts
 
-- FR-1 A visitor can register with an email, password, and display name; emails are unique.
+- FR-1 A visitor can register with a display name, a unique username, an email, and a password; emails are unique.
+- FR-1a **(M7)** Username is the user's public product identity — used for discovery/collaboration (FR-18) — and is strictly separate from email, which is private and used only for authentication (FR-2). Usernames are unique case-insensitively, 3-20 characters, lowercase ASCII letters/digits/underscore/period only, must start with a letter or digit, and are normalized (trimmed, a leading `@` stripped, lowercased) before storage and before every comparison. Stored without the `@` prefix; the UI adds `@` for display only.
 - FR-2 A registered user can log in with email + password and receive an access token and a refresh token.
 - FR-3 A user can use a valid refresh token to obtain a new access token without re-entering credentials; each refresh rotates the refresh token (the old one is invalidated).
 - FR-4 A user can log out, which revokes their current refresh token.
 - FR-5 Passwords are stored only as salted hashes, never in plain text or logs.
-- FR-6 An authenticated user can fetch their own profile (id, email, name).
+- FR-6 An authenticated user can fetch their own profile (id, email, name, username).
 
 Deferred: password reset, email verification, OAuth/social login, multi-device session management UI.
 
@@ -34,8 +35,9 @@ Deferred: password reset, email verification, OAuth/social login, multi-device s
 
 ### 1.4 User Search
 
-- FR-18 An authenticated user can search for other users by name or email substring, receiving only `id`, `name`, and `email` for matches.
+- FR-18 An authenticated user can search for other users by username or display-name substring — **never email** — receiving only `id`, `name`, and `username` for matches.
 - FR-19 Search results exclude the requesting user themselves.
+- FR-19a **(M7)** The search query must be at least 2 and at most 50 characters (after trimming and stripping a leading `@`); results are limited to 20 and ordered deterministically: exact username match, then username prefix match, then other username substring matches, then display-name matches. These bounds exist specifically to keep an authenticated discovery feature from becoming an account-enumeration or full-directory surface (see §4 Security).
 
 ### 1.5 Task Assignment
 
@@ -91,6 +93,8 @@ All checks are enforced server-side in the service layer (see [ARCHITECTURE.md](
 - **EC-11 Empty/whitespace title.** Rejected at the validation layer (Zod), never reaching the service/database.
 - **EC-12 Category free text.** Category has no fixed vocabulary in v1; filtering is by exact string match on whatever value the user has used before (see [DATABASE.md](./DATABASE.md) for the future dedicated-entity path).
 - **EC-13 Deadline before scheduledAt.** If both `scheduledAt` and `deadline` are set on a task, `deadline` must be greater than or equal to `scheduledAt`. This is checked against the task's resulting complete state — on create, and on a partial update, where only one of the two fields may be present in the request but the other's existing stored value still applies. A task may still have only `scheduledAt`, only `deadline`, or neither; violating the invariant is rejected as a conflict error, not silently corrected.
+- **EC-14 Duplicate username registration.** Registration with an already-used username (matched case-insensitively, after normalization) is rejected with a conflict error distinct from the email-duplicate case (EC-10) — the response's `details.field` identifies which of the two collided, so a client can show the right message without guessing from text.
+- **EC-15 Search query out of bounds.** A `q` shorter than 2 characters or longer than 50 (after trimming/normalization), or missing entirely, is rejected at validation (FR-19a) rather than silently returning an empty or unbounded result set.
 
 ## 4. Non-Functional Requirements
 
@@ -102,6 +106,7 @@ All checks are enforced server-side in the service layer (see [ARCHITECTURE.md](
 - Refresh tokens rotate on every use; reuse of an invalidated token revokes the whole token family (EC-9).
 - No endpoint trusts a client-supplied user id for authorization — the acting user always comes from the verified access token.
 - Generic, non-enumerating error messages on login; user search (FR-18) is an intentional, authenticated-only discovery surface and doesn't weaken this, since it requires being logged in.
+- User search never matches on or returns email — only `id`/`name`/`username` (FR-18, FR-1a) — and is bounded by query-length limits and a result cap (FR-19a) specifically to limit account enumeration; it is a discovery tool for people who already know roughly who they're looking for, not a public directory. A production deployment should additionally consider rate-limiting this endpoint; v1 does not implement rate limiting anywhere (see ARCHITECTURE.md §6).
 
 ### Performance
 

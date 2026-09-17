@@ -62,6 +62,12 @@ model User {
   email        String   @unique
   passwordHash String
   name         String
+  // M7: public product identity (discovery/collaboration) — private email
+  // stays the sole authentication credential. Always stored pre-normalized
+  // (trim, strip leading "@", lowercase — see @taskflow/shared
+  // normalizeUsername), so this plain @unique constraint *is* the
+  // case-insensitive uniqueness enforcement; no citext/collation needed.
+  username     String   @unique
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -159,9 +165,10 @@ Notes:
 | `TaskAssignment(toUserId, status)` | Inbox (FR-28) |
 | `TaskAssignment(fromUserId, status)` | Sent-assignments list (FR-29) |
 | `TaskAssignment(taskId, status)` | Enforcing "no other pending assignment on this task" (FR-21) |
-| `User(name)` | User search (FR-18) — combined with an `email` lookup (already unique-indexed) |
+| `User(name)` | User search (FR-18) — display-name substring match |
+| `User(username)` (from `@unique`) | Exact-match lookups (registration uniqueness checks); also partially serves username search — see caveat below |
 
-Free-text title/description search (FR-16) uses `ILIKE`/`contains` in v1, which is adequate at MVP scale without a dedicated search index; see §7 for the future full-text-search path.
+Free-text title/description search (FR-16) and username/name search (FR-18) both use `ILIKE`/`contains` in v1, which is adequate at MVP scale without a dedicated search index; see §7 for the future full-text-search path. **Caveat on the username/name indexes**: `User(username)`'s unique btree index accelerates exact matches (used for uniqueness checks) and, depending on the database's collation, may partially accelerate a `startsWith` prefix query — but Prisma's `contains` (arbitrary substring, which is what `GET /users/search` and `GET /tasks?q=` both use) cannot use a plain btree index at all; Postgres falls back to a sequential scan. This is an accepted v1 tradeoff (small expected user/task counts, personal-app scope), not an oversight — §7 shows the additive path (`pg_trgm` + GIN) if it's ever needed.
 
 ## 6. Task & Assignment State Transitions
 
@@ -212,7 +219,18 @@ None of these are built in v1. They're listed to show the current design doesn't
 | **Smart scheduling** | Likely no schema change (reads `priority`/`deadline`/`scheduledAt`); at most an additive `estimatedDurationMinutes` on `Task` | It's a read-side algorithm over existing fields, not a new data relationship. |
 | **Category as a managed entity** | New `Category` table (`userId`, `name`, `color`) + `Task.categoryId` replacing the string, with a data migration copying distinct strings into rows | Only needed if per-user category management (rename/delete/color) becomes a requirement; today's string field is a strict subset of that model. |
 | **Full-text task search at scale** | Postgres `tsvector` column + GIN index on `Task` | Additive column/index; `ILIKE` queries are simply replaced, no relational changes. |
+| **Full-text/fuzzy user search at scale** | `pg_trgm` extension + GIN index on `User.username`/`User.name`, or a dedicated search index | Additive; today's `ILIKE`/`contains` approach (see §5 caveat) is a strict subset with no relational changes needed to replace it. |
 
 ## 8. Migration Strategy
 
 `prisma migrate dev` in development, with every migration file committed and reviewed like any other code change. `prisma migrate deploy` runs in CI/CD against staging/production. No manual schema edits outside of migrations.
+
+### Adding a required, unique column to a populated table (M7 example)
+
+`User.username` had to become required and unique on a table that already had rows (every account created in M1-M6). Doing this in one migration would fail the moment Postgres tried to enforce `NOT NULL` against existing `NULL`s. The safe sequence, used here and worth repeating for any future required column on a populated table:
+
+1. **Add nullable.** `username String?` (still `@unique` — Postgres allows multiple `NULL`s in a unique index, so this is non-destructive) — migration `add_username_nullable`.
+2. **Backfill.** A one-off script (`apps/api/prisma/backfillUsernames.ts`) fills in every row where `username IS NULL`. For local/dev data (no real users yet), it derives a candidate from the email local-part, sanitizes it through the exact same `usernameSchema` real registrations use, and appends a numeric suffix on collision until it's unique. Nothing is deleted or recreated.
+3. **Require.** `username String` (drop the `?`) — migration `require_username`. By this point every row already satisfies `NOT NULL` and the unique constraint, so this migration is a no-op risk-wise; it only formalizes what's already true.
+
+This pattern generalizes beyond usernames: nullable-add → backfill script → make-required, always as separate migrations, never one migration that assumes existing rows already comply.

@@ -14,6 +14,9 @@ export function createFakeRepositories() {
     async findByEmail(email) {
       return users.find((u) => u.email === email) ?? null;
     },
+    async findByUsername(username) {
+      return users.find((u) => u.username === username) ?? null;
+    },
     async findById(id) {
       return users.find((u) => u.id === id) ?? null;
     },
@@ -23,6 +26,7 @@ export function createFakeRepositories() {
         email: data.email,
         passwordHash: data.passwordHash,
         name: data.name,
+        username: data.username,
         createdAt: new Date(),
         updatedAt: new Date(),
       };

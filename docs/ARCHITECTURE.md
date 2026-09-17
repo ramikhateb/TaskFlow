@@ -82,7 +82,7 @@ Resource-oriented REST, grouped by domain. Every route except `/auth/register` a
 **Users**
 | Method & Path | Purpose |
 |---|---|
-| `GET /users/search` | Search by name/email substring; query: `q` |
+| `GET /users/search` | Search by username or display-name substring — **never email**; query: `q` (2-50 chars after normalization). Authenticated only; excludes the caller; results capped at 20 (FR-18/FR-19a) |
 
 **Assignments**
 | Method & Path | Purpose |
@@ -138,6 +138,7 @@ Applied per milestone in [ROADMAP.md](./ROADMAP.md) — every milestone ships wi
 - **Tokens**: short-lived access tokens (~15 min target); refresh tokens stored server-side as hashes, rotated on every use, with reuse-of-a-retired-token revoking the whole family (DATABASE.md §4, EC-9).
 - **Authorization**: enforced exclusively in the service layer from the verified token's user id — never from a client-supplied id, header, or body field.
 - **Enumeration resistance**: login returns a generic "invalid credentials" message regardless of whether the email exists (EC-10); this is separate from — and not undermined by — the authenticated-only user search feature (FR-18), which is an intentional discovery surface, not an unauthenticated one.
+- **Identity separation (M7)**: email is the private authentication credential; username is the public product identity used for discovery. User search matches and returns only `id`/`name`/`username` — email is never a search predicate and never appears in a search response, so the discovery surface can't be used to check whether a given email address has an account. Query-length bounds and a result cap (FR-19a) further limit this endpoint's use for account enumeration. Production hardening consideration (not implemented in v1, no rate-limiting infrastructure exists in this architecture yet): rate-limit `GET /users/search` per user/IP.
 - **Input validation**: every mutating and parameterized endpoint validated by Zod before touching business logic; Prisma's parameterized queries prevent SQL injection by construction.
 - **Dependency hygiene**: `npm audit` (or equivalent) as part of the CI gate once CI is introduced (see ROADMAP.md M1).
 - **CORS**: API restricts allowed origins to known clients (Expo dev client / EAS build origins); not left open by default.
@@ -163,3 +164,5 @@ Applied per milestone in [ROADMAP.md](./ROADMAP.md) — every milestone ships wi
 | Refresh tokens | Opaque, hashed, rotated per use, family-revocable | Enables revocation and reuse detection, unlike self-contained JWTs |
 | Assignment transitions | Dedicated action endpoints (`/accept`, `/decline`, `/cancel`), not generic PATCH | Each transition has side effects beyond a field write; hiding that behind PATCH would be misleading |
 | Monorepo tooling | npm workspaces, no Turborepo/Nx | Project is small enough that extra build orchestration isn't justified yet |
+| Identity model (M7) | Email = private auth credential (login only); username = public product identity (discovery/collaboration only) | Keeps the sign-in credential out of any surface visible to other users; search/public-profile responses never contain email, so there's no code path where the two are conflated |
+| Username uniqueness | Always store pre-normalized (trimmed, lowercased, "@" stripped) + a plain Postgres `@unique` constraint | Case-insensitive uniqueness without a `citext` extension or collation trick — two different-case inputs normalize to the same stored string before the constraint ever sees them |

@@ -19,7 +19,12 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-const validRegistration = { email: "alice@example.com", password: "password1", name: "Alice" };
+const validRegistration = {
+  email: "alice@example.com",
+  password: "password1",
+  name: "Alice",
+  username: "alice",
+};
 
 describe("POST /auth/register", () => {
   it("creates an account and returns tokens + profile", async () => {
@@ -27,7 +32,7 @@ describe("POST /auth/register", () => {
 
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
-      user: { email: "alice@example.com", name: "Alice" },
+      user: { email: "alice@example.com", name: "Alice", username: "alice" },
     });
     expect(res.body.accessToken).toEqual(expect.any(String));
     expect(res.body.refreshToken).toEqual(expect.any(String));
@@ -60,6 +65,101 @@ describe("POST /auth/register", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+});
+
+describe("POST /auth/register — username (M7, FR-1a)", () => {
+  it("normalizes username: trims, strips a leading @, lowercases", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, username: "  @RamiKhateb  " });
+
+    expect(res.status).toBe(201);
+    expect(res.body.user.username).toBe("ramikhateb");
+  });
+
+  it("rejects a duplicate username with 409 CONFLICT", async () => {
+    await request(app).post("/auth/register").send(validRegistration);
+
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, email: "someone-else@example.com" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("CONFLICT");
+  });
+
+  it("rejects a case-insensitive duplicate username with 409 CONFLICT", async () => {
+    await request(app).post("/auth/register").send(validRegistration);
+
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, email: "someone-else@example.com", username: "ALICE" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("CONFLICT");
+  });
+
+  it("rejects a duplicate email even when the username differs (both checked)", async () => {
+    await request(app).post("/auth/register").send(validRegistration);
+
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, username: "someoneelse" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("CONFLICT");
+  });
+
+  it("rejects invalid characters with 400 VALIDATION_ERROR", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, username: "alice smith!" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects a too-short username with 400 VALIDATION_ERROR", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, username: "ab" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects a too-long username with 400 VALIDATION_ERROR", async () => {
+    const res = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, username: "a".repeat(21) });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("accepts a username at the minimum and maximum length", async () => {
+    const min = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, username: "abc" });
+    expect(min.status).toBe(201);
+
+    const max = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, email: "other@example.com", username: "a".repeat(20) });
+    expect(max.status).toBe(201);
+  });
+
+  it("rejects a username starting with an underscore or period", async () => {
+    const underscore = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, username: "_alice" });
+    expect(underscore.status).toBe(400);
+
+    const period = await request(app)
+      .post("/auth/register")
+      .send({ ...validRegistration, email: "other@example.com", username: ".alice" });
+    expect(period.status).toBe(400);
   });
 });
 
@@ -105,7 +205,12 @@ describe("GET /auth/me", () => {
       .set("Authorization", `Bearer ${body.accessToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ id: body.user.id, email: validRegistration.email, name: "Alice" });
+    expect(res.body).toEqual({
+      id: body.user.id,
+      email: validRegistration.email,
+      name: "Alice",
+      username: "alice",
+    });
   });
 
   it("rejects a missing Authorization header with 401", async () => {

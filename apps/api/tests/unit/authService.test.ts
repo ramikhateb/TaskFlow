@@ -23,9 +23,15 @@ describe("authService.register", () => {
       email: "a@example.com",
       password: "password1",
       name: "Alice",
+      username: "alice",
     });
 
-    expect(result.user).toEqual({ id: expect.any(String), email: "a@example.com", name: "Alice" });
+    expect(result.user).toEqual({
+      id: expect.any(String),
+      email: "a@example.com",
+      name: "Alice",
+      username: "alice",
+    });
     expect(result.accessToken).toEqual(expect.any(String));
     expect(result.refreshToken).toEqual(expect.any(String));
     expect(users).toHaveLength(1);
@@ -34,10 +40,39 @@ describe("authService.register", () => {
 
   it("rejects a duplicate email with ConflictError", async () => {
     const { service } = buildService();
-    await service.register({ email: "a@example.com", password: "password1", name: "Alice" });
+    await service.register({
+      email: "a@example.com",
+      password: "password1",
+      name: "Alice",
+      username: "alice",
+    });
 
     await expect(
-      service.register({ email: "a@example.com", password: "password2", name: "Alice 2" }),
+      service.register({
+        email: "a@example.com",
+        password: "password2",
+        name: "Alice 2",
+        username: "alice2",
+      }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("rejects a duplicate username with ConflictError", async () => {
+    const { service } = buildService();
+    await service.register({
+      email: "a@example.com",
+      password: "password1",
+      name: "Alice",
+      username: "alice",
+    });
+
+    await expect(
+      service.register({
+        email: "different@example.com",
+        password: "password2",
+        name: "Alice 2",
+        username: "alice",
+      }),
     ).rejects.toBeInstanceOf(ConflictError);
   });
 });
@@ -45,7 +80,12 @@ describe("authService.register", () => {
 describe("authService.login", () => {
   it("succeeds with correct credentials", async () => {
     const { service } = buildService();
-    await service.register({ email: "a@example.com", password: "password1", name: "Alice" });
+    await service.register({
+      email: "a@example.com",
+      password: "password1",
+      name: "Alice",
+      username: "alice",
+    });
 
     const result = await service.login({ email: "a@example.com", password: "password1" });
     expect(result.user.email).toBe("a@example.com");
@@ -62,7 +102,12 @@ describe("authService.login", () => {
 
   it("rejects a wrong password with the same generic message as an unknown email", async () => {
     const { service } = buildService();
-    await service.register({ email: "a@example.com", password: "password1", name: "Alice" });
+    await service.register({
+      email: "a@example.com",
+      password: "password1",
+      name: "Alice",
+      username: "alice",
+    });
 
     await expect(
       service.login({ email: "a@example.com", password: "wrong" }),
@@ -86,6 +131,7 @@ describe("authService.refresh", () => {
       email: "a@example.com",
       password: "password1",
       name: "Alice",
+      username: "alice",
     });
 
     const rotated = await service.refresh(original);
@@ -103,6 +149,7 @@ describe("authService.refresh", () => {
       email: "a@example.com",
       password: "password1",
       name: "Alice",
+      username: "alice",
     });
 
     await service.refresh(original); // rotates once, retiring `original`
@@ -123,6 +170,7 @@ describe("authService.refresh", () => {
       email: "a@example.com",
       password: "password1",
       name: "Alice",
+      username: "alice",
     });
     const record = await refreshTokenRepository.findByTokenHash(hashRefreshToken(refreshToken));
     record!.expiresAt = new Date(Date.now() - 1000);
@@ -138,6 +186,7 @@ describe("authService.logout", () => {
       email: "a@example.com",
       password: "password1",
       name: "Alice",
+      username: "alice",
     });
 
     await service.logout(refreshToken);
@@ -156,6 +205,7 @@ describe("authService.logout", () => {
       email: "a@example.com",
       password: "password1",
       name: "Alice",
+      username: "alice",
     });
 
     await service.logout(refreshToken);

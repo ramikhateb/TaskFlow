@@ -1,7 +1,9 @@
+import { useRouter } from "expo-router";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useLogout, useMe } from "../../src/features/auth/useAuth";
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const me = useMe();
   const logout = useLogout();
 
@@ -15,10 +17,20 @@ export default function ProfileScreen() {
         <View style={styles.info}>
           <Text style={styles.label}>Name</Text>
           <Text style={styles.value}>{me.data.name}</Text>
+          <Text style={styles.label}>Username</Text>
+          <Text style={styles.value}>@{me.data.username}</Text>
           <Text style={styles.label}>Email</Text>
           <Text style={styles.value}>{me.data.email}</Text>
         </View>
       )}
+
+      <TouchableOpacity
+        style={styles.findPeopleButton}
+        accessibilityRole="button"
+        onPress={() => router.push("/search-users")}
+      >
+        <Text style={styles.findPeopleText}>Find People</Text>
+      </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.signOutButton}
@@ -43,12 +55,20 @@ const styles = StyleSheet.create({
   info: { gap: 4, marginTop: 8 },
   label: { fontSize: 12, color: "#666", fontWeight: "600", marginTop: 12 },
   value: { fontSize: 16 },
+  findPeopleButton: {
+    backgroundColor: "#eef7ee",
+    borderRadius: 8,
+    padding: 14,
+    alignItems: "center",
+    marginTop: 24,
+  },
+  findPeopleText: { color: "#1a7f37", fontSize: 16, fontWeight: "600" },
   signOutButton: {
     backgroundColor: "#c0392b",
     borderRadius: 8,
     padding: 14,
     alignItems: "center",
-    marginTop: 24,
+    marginTop: 12,
   },
   signOutText: { color: "#fff", fontSize: 16, fontWeight: "600" },
 });

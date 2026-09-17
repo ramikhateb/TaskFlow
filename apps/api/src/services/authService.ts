@@ -14,8 +14,14 @@ import {
 // can be unit tested against fakes, with no Prisma import here at all.
 export interface UserRepository {
   findByEmail(email: string): Promise<User | null>;
+  findByUsername(username: string): Promise<User | null>;
   findById(id: string): Promise<User | null>;
-  create(data: { email: string; passwordHash: string; name: string }): Promise<User>;
+  create(data: {
+    email: string;
+    passwordHash: string;
+    name: string;
+    username: string;
+  }): Promise<User>;
 }
 
 export interface RefreshTokenRepository {
@@ -39,7 +45,7 @@ export interface AuthServiceDeps {
 const GENERIC_LOGIN_ERROR = "Invalid email or password";
 
 function toUserProfile(user: User): UserProfile {
-  return { id: user.id, email: user.email, name: user.name };
+  return { id: user.id, email: user.email, name: user.name, username: user.username };
 }
 
 export function createAuthService({
@@ -68,12 +74,20 @@ export function createAuthService({
   }
 
   async function register(input: RegisterRequest): Promise<AuthResponse> {
-    const existing = await userRepository.findByEmail(input.email);
-    if (existing) {
+    const existingEmail = await userRepository.findByEmail(input.email);
+    if (existingEmail) {
       // Deliberately distinct from login's generic message (EC-10): this is
       // registration, where confirming "you already have an account" is
       // expected UX, not an enumeration risk.
-      throw new ConflictError("An account with this email already exists");
+      throw new ConflictError("An account with this email already exists", { field: "email" });
+    }
+
+    // input.username already went through usernameSchema's normalize+
+    // validate at the API boundary (trimmed, lowercased, "@"-stripped), so
+    // this is a plain equality lookup — no re-normalization needed here.
+    const existingUsername = await userRepository.findByUsername(input.username);
+    if (existingUsername) {
+      throw new ConflictError("This username is already taken", { field: "username" });
     }
 
     const passwordHash = await hashPassword(input.password);
@@ -81,6 +95,7 @@ export function createAuthService({
       email: input.email,
       passwordHash,
       name: input.name,
+      username: input.username,
     });
 
     const { accessToken, refreshToken } = await issueTokenPair(user.id, generateFamilyId());

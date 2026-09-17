@@ -60,14 +60,17 @@ Each milestone is small enough to implement, test, and commit on its own, and le
 
 **Exit criteria**: a user can narrow their task list by any supported filter combination.
 
-## M7 — User Search
+## M7 — User Search & Product Identity
 
-- Delivers FR-18, FR-19.
-- Endpoint: `GET /users/search`.
-- Mobile: user search screen (used later by M8's assignment flow).
-- Tests: integration tests for substring match, self-exclusion, and that only `id`/`name`/`email` are exposed.
+- Delivers FR-1a (username), updated FR-1/FR-6, FR-18 (updated: username/name, not email), FR-19, FR-19a.
+- `User.username` added: unique, case-insensitively normalized, required going forward. Existing (pre-M7) rows backfilled via a deterministic script — see DATABASE.md §8 for the nullable-add → backfill → make-required sequence.
+- Registration now collects name, username, email, password. Login is unchanged (still email + password) — email remains the sole authentication identifier; username is purely for discovery/collaboration.
+- Endpoint: `GET /users/search` — matches username/name substrings, **never** email; excludes the caller; query bounded 2-50 chars; results capped at 20, deterministically ordered (exact username → prefix → other substring → name match).
+- New shared `PublicUser` contract (`id`/`name`/`username` only) — distinct from the authenticated user's own `UserProfile` (which still includes `email`).
+- Mobile: registration screen collects username with validation feedback; reusable user-search component (used later by M8's assignment flow); Profile screen shows the user's own `@username`.
+- Tests: registration (valid/duplicate/case-insensitive-duplicate/invalid-chars/too-short/too-long username), search (username/name match, case-insensitivity, `@`-prefix handling, ordering, self-exclusion, query-length bounds, result cap, email never searched/returned), and a full regression pass confirming M2-M6 behavior is unchanged.
 
-**Exit criteria**: a user can find another registered user by name or email.
+**Exit criteria**: a user can find another registered user by name or username (never email), see only their `id`/`name`/`username`, and existing email/password login/registration-adjacent flows continue to work exactly as before.
 
 ## M8 — Task Assignment (Create)
 

@@ -12,6 +12,9 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    /** The server's error code (e.g. "CONFLICT") and details, when available. */
+    public readonly code?: string,
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -103,7 +106,18 @@ async function performFetch<T>(
   }
 
   if (!response.ok) {
-    throw new ApiError(`Request to ${path} failed with status ${response.status}`, response.status);
+    // Best-effort: surface the server's structured { error: { code, message,
+    // details } } shape (ARCHITECTURE.md §4) so callers can distinguish e.g.
+    // "email taken" from "username taken" — both 409s — without parsing text.
+    const body = await response.json().catch(() => null);
+    const serverError = body?.error as
+      { code?: string; message?: string; details?: unknown } | undefined;
+    throw new ApiError(
+      serverError?.message ?? `Request to ${path} failed with status ${response.status}`,
+      response.status,
+      serverError?.code,
+      serverError?.details,
+    );
   }
 
   if (response.status === 204) {

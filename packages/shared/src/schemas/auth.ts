@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { usernameSchema } from "./user";
 
 // Password policy: bcrypt silently truncates beyond 72 bytes, so 72 is a hard
 // cap, not a style choice. Minimum length + one letter + one digit is a
@@ -10,10 +11,14 @@ export const passwordSchema = z
   .regex(/[A-Za-z]/, "Password must contain at least one letter")
   .regex(/[0-9]/, "Password must contain at least one number");
 
+// The current user's own profile — email is appropriate here (it's their own
+// account), unlike publicUserSchema (@taskflow/shared user.ts) which is what
+// *other* users see and deliberately omits it.
 export const userProfileSchema = z.object({
   id: z.string(),
   email: z.string().email(),
   name: z.string(),
+  username: z.string(),
 });
 export type UserProfile = z.infer<typeof userProfileSchema>;
 
@@ -21,6 +26,7 @@ export const registerRequestSchema = z.object({
   email: z.string().email(),
   password: passwordSchema,
   name: z.string().trim().min(1, "Name is required").max(100),
+  username: usernameSchema,
 });
 export type RegisterRequest = z.infer<typeof registerRequestSchema>;
 

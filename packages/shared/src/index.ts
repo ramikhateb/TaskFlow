@@ -5,3 +5,4 @@ export const SHARED_PACKAGE_ID = "@taskflow/shared" as const;
 
 export * from "./schemas/auth";
 export * from "./schemas/task";
+export * from "./schemas/user";

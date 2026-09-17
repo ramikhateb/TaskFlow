@@ -1,6 +1,10 @@
 // User and RefreshToken introduced in M2, per docs/DATABASE.md §4.
 // Task introduced in M3 (self-owned only: creator == assignee always, no
 // TaskAssignment yet). M4 adds priority/category/scheduledAt/deadline.
+// M7 adds User.username, required + unique — added nullable, backfilled
+// (see prisma/backfillUsernames.ts), then made required, across three
+// migrations so existing rows were never at risk (docs/DATABASE.md §Migration
+// Strategy has the full sequence).
 
 generator client {
   provider = "prisma-client-js"
@@ -16,6 +20,11 @@ model User {
   email        String   @unique
   passwordHash String
   name         String
+  // M7: public product identity, used for discovery/collaboration — always
+  // stored pre-lowercased (see normalizeUsername in @taskflow/shared), so
+  // this plain @unique constraint IS the case-insensitive uniqueness
+  // enforcement; no citext/collation trick needed.
+  username     String   @unique
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
