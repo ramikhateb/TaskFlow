@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useLogout, useMe } from "../../src/features/auth/useAuth";
+import { colors, fontSize, radius, spacing } from "../../src/ui/theme";
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -13,12 +14,17 @@ export default function ProfileScreen() {
 
       {me.isLoading && <ActivityIndicator style={styles.spacer} />}
 
+      {me.isError && (
+        <Text style={styles.error}>Could not load your profile. Pull down elsewhere to retry.</Text>
+      )}
+
       {me.data && (
-        <View style={styles.info}>
-          <Text style={styles.label}>Name</Text>
-          <Text style={styles.value}>{me.data.name}</Text>
-          <Text style={styles.label}>Username</Text>
-          <Text style={styles.value}>@{me.data.username}</Text>
+        <View style={styles.identityCard}>
+          <Text style={styles.name}>{me.data.name}</Text>
+          <Text style={styles.username}>@{me.data.username}</Text>
+
+          <View style={styles.divider} />
+
           <Text style={styles.label}>Email</Text>
           <Text style={styles.value}>{me.data.email}</Text>
         </View>
@@ -39,7 +45,7 @@ export default function ProfileScreen() {
         onPress={() => logout.mutate()}
       >
         {logout.isPending ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.textOnPrimary} />
         ) : (
           <Text style={styles.signOutText}>Sign Out</Text>
         )}
@@ -49,26 +55,35 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff", padding: 24, gap: 16 },
-  title: { fontSize: 28, fontWeight: "700" },
-  spacer: { marginTop: 24 },
-  info: { gap: 4, marginTop: 8 },
-  label: { fontSize: 12, color: "#666", fontWeight: "600", marginTop: 12 },
-  value: { fontSize: 16 },
+  container: { flex: 1, backgroundColor: colors.background, padding: spacing.xl, gap: spacing.lg },
+  title: { fontSize: fontSize.xxl, fontWeight: "700", color: colors.textPrimary },
+  spacer: { marginTop: spacing.xl },
+  error: { color: colors.danger, marginTop: spacing.md },
+  identityCard: {
+    backgroundColor: colors.primaryMuted,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    marginTop: spacing.sm,
+  },
+  name: { fontSize: fontSize.xl, fontWeight: "700", color: colors.textPrimary },
+  username: { fontSize: fontSize.base, color: colors.primary, fontWeight: "600", marginTop: 2 },
+  divider: { height: 1, backgroundColor: colors.separator, marginVertical: spacing.md },
+  label: { fontSize: fontSize.xs, color: colors.textMuted, fontWeight: "600" },
+  value: { fontSize: fontSize.md, color: colors.textPrimary, marginTop: 2 },
   findPeopleButton: {
-    backgroundColor: "#eef7ee",
-    borderRadius: 8,
+    backgroundColor: colors.primaryMuted,
+    borderRadius: radius.md,
     padding: 14,
     alignItems: "center",
-    marginTop: 24,
+    marginTop: spacing.xl,
   },
-  findPeopleText: { color: "#1a7f37", fontSize: 16, fontWeight: "600" },
+  findPeopleText: { color: colors.primary, fontSize: fontSize.md, fontWeight: "600" },
   signOutButton: {
-    backgroundColor: "#c0392b",
-    borderRadius: 8,
+    backgroundColor: colors.danger,
+    borderRadius: radius.md,
     padding: 14,
     alignItems: "center",
-    marginTop: 12,
+    marginTop: spacing.md,
   },
-  signOutText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  signOutText: { color: colors.textOnPrimary, fontSize: fontSize.md, fontWeight: "600" },
 });

@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import { colors, fontSize, radius, spacing } from "../../ui/theme";
 import { isSearchQueryTooShort, normalizeSearchQuery } from "./normalizeSearchQuery";
 import { useUserSearch } from "./useUserSearch";
 
@@ -41,9 +42,11 @@ export function UserSearchField({ onSelectUser, selectedUserId }: UserSearchFiel
       <TextInput
         style={styles.input}
         placeholder="Search by name or @username"
+        placeholderTextColor={colors.textMuted}
         accessibilityLabel="Search users"
         autoCapitalize="none"
         autoCorrect={false}
+        returnKeyType="search"
         value={queryDraft}
         onChangeText={setQueryDraft}
       />
@@ -66,12 +69,14 @@ export function UserSearchField({ onSelectUser, selectedUserId }: UserSearchFiel
           data={search.data}
           keyExtractor={(user) => user.id}
           style={styles.list}
+          keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => {
             const selected = item.id === selectedUserId;
             return (
               <TouchableOpacity
                 style={[styles.row, selected && styles.rowSelected]}
                 accessibilityRole="button"
+                accessibilityLabel={`${item.name}, @${item.username}`}
                 accessibilityState={{ selected }}
                 onPress={() => onSelectUser?.(item)}
               >
@@ -87,28 +92,29 @@ export function UserSearchField({ onSelectUser, selectedUserId }: UserSearchFiel
 }
 
 const styles = StyleSheet.create({
-  container: { gap: 8 },
+  container: { gap: spacing.sm },
   input: {
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 15,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
   },
-  hint: { color: "#666", marginTop: 8 },
-  error: { color: "#c0392b", marginTop: 8 },
-  spacer: { marginTop: 16 },
-  list: { marginTop: 8 },
+  hint: { color: colors.textMuted, marginTop: spacing.sm },
+  error: { color: colors.danger, marginTop: spacing.sm },
+  spacer: { marginTop: spacing.lg },
+  list: { marginTop: spacing.sm },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: colors.separator,
   },
-  rowSelected: { backgroundColor: "#eef7ee" },
-  name: { fontSize: 16, fontWeight: "600" },
-  username: { fontSize: 14, color: "#666" },
+  rowSelected: { backgroundColor: colors.primaryMuted },
+  name: { fontSize: fontSize.md, fontWeight: "600", color: colors.textPrimary },
+  username: { fontSize: fontSize.md - 2, color: colors.textMuted },
 });

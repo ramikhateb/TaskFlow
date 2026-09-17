@@ -16,6 +16,7 @@ import {
   useDeclineAssignment,
   useInbox,
 } from "../../../src/features/inbox/useInbox";
+import { colors, fontSize, radius, spacing } from "../../../src/ui/theme";
 
 type ScheduleChoice = "pick" | "later";
 
@@ -46,6 +47,13 @@ export default function InboxRequestDetailScreen() {
         <Text style={styles.error}>
           This request is no longer available — it may have already been resolved.
         </Text>
+        <TouchableOpacity
+          style={[styles.button, styles.secondaryButton, styles.backButton]}
+          accessibilityRole="button"
+          onPress={() => router.back()}
+        >
+          <Text style={styles.secondaryButtonText}>Back to Inbox</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -67,7 +75,11 @@ export default function InboxRequestDetailScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
       <View style={styles.statusRow}>
         <Text style={[styles.priorityBadge, { color: PRIORITY_COLORS[assignment.task.priority] }]}>
           {priorityLabel(assignment.task.priority)} priority
@@ -102,7 +114,7 @@ export default function InboxRequestDetailScreen() {
             onPress={handleDecline}
           >
             {declineAssignment.isPending ? (
-              <ActivityIndicator color="#c0392b" />
+              <ActivityIndicator color={colors.danger} />
             ) : (
               <Text style={styles.declineButtonText}>Decline</Text>
             )}
@@ -118,7 +130,9 @@ export default function InboxRequestDetailScreen() {
       )}
 
       {declineAssignment.isError && (
-        <Text style={styles.error}>Could not decline — please try again.</Text>
+        <Text style={styles.error} accessibilityRole="alert">
+          Could not decline — it may have already been resolved. Pull to refresh.
+        </Text>
       )}
 
       {isAccepting && (
@@ -138,7 +152,7 @@ export default function InboxRequestDetailScreen() {
             <DateTimeField label="Date & time" value={chosenDate} onChange={setChosenDate} />
           )}
           {scheduleChoice === "pick" && chosenDate && !scheduleIsValid && (
-            <Text style={styles.error}>
+            <Text style={styles.error} accessibilityRole="alert">
               This is after the task&apos;s deadline — pick an earlier time.
             </Text>
           )}
@@ -152,6 +166,11 @@ export default function InboxRequestDetailScreen() {
             <View style={[styles.radio, scheduleChoice === "later" && styles.radioSelected]} />
             <Text style={styles.choiceLabel}>Schedule later</Text>
           </TouchableOpacity>
+          {scheduleChoice === "later" && (
+            <Text style={styles.choiceHint}>
+              It won&apos;t appear on your Schedule until you set a time later from the task.
+            </Text>
+          )}
 
           <View style={styles.actionsRow}>
             <TouchableOpacity
@@ -172,7 +191,7 @@ export default function InboxRequestDetailScreen() {
               onPress={handleConfirmAccept}
             >
               {acceptAssignment.isPending ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={colors.textOnPrimary} />
               ) : (
                 <Text style={styles.acceptButtonText}>Accept task</Text>
               )}
@@ -180,7 +199,9 @@ export default function InboxRequestDetailScreen() {
           </View>
 
           {acceptAssignment.isError && (
-            <Text style={styles.error}>Could not accept — please try again.</Text>
+            <Text style={styles.error} accessibilityRole="alert">
+              Could not accept — it may have already been resolved. Pull to refresh.
+            </Text>
           )}
         </View>
       )}
@@ -189,41 +210,55 @@ export default function InboxRequestDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 24, gap: 12 },
-  centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  statusRow: { flexDirection: "row" },
-  priorityBadge: { fontSize: 13, fontWeight: "700" },
-  title: { fontSize: 22, fontWeight: "700" },
-  description: { fontSize: 15, color: "#333" },
-  fromLine: { fontSize: 14, color: "#444", fontWeight: "600" },
-  metaLine: { fontSize: 13, color: "#666" },
-  message: { fontSize: 14, color: "#333", fontStyle: "italic", marginTop: 4 },
-  actionsRow: { flexDirection: "row", gap: 12, marginTop: 16 },
-  button: { flex: 1, borderRadius: 8, padding: 14, alignItems: "center" },
-  declineButton: { backgroundColor: "#fdecea" },
-  declineButtonText: { color: "#c0392b", fontSize: 16, fontWeight: "600" },
-  acceptButton: { backgroundColor: "#1a7f37" },
-  acceptButtonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  secondaryButton: { backgroundColor: "#eef7ee" },
-  secondaryButtonText: { color: "#1a7f37", fontSize: 16, fontWeight: "600" },
-  error: { color: "#c0392b", fontSize: 13 },
-  acceptPanel: {
-    marginTop: 16,
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#eee",
-    paddingTop: 16,
+  container: { flex: 1, backgroundColor: colors.background },
+  content: { padding: spacing.xl, gap: spacing.md },
+  centered: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.xl,
+    gap: spacing.md,
+    backgroundColor: colors.background,
   },
-  acceptPanelTitle: { fontSize: 16, fontWeight: "600" },
+  backButton: { paddingHorizontal: spacing.xl },
+  statusRow: { flexDirection: "row" },
+  priorityBadge: { fontSize: fontSize.body, fontWeight: "700" },
+  title: { fontSize: fontSize.xl, fontWeight: "700", color: colors.textPrimary },
+  description: { fontSize: fontSize.base, color: colors.textBody },
+  fromLine: { fontSize: fontSize.md, color: colors.textSubtle, fontWeight: "600" },
+  metaLine: { fontSize: fontSize.body, color: colors.textMuted },
+  message: {
+    fontSize: fontSize.md,
+    color: colors.textBody,
+    fontStyle: "italic",
+    marginTop: spacing.xs,
+  },
+  actionsRow: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
+  button: { flex: 1, borderRadius: radius.md, padding: 14, alignItems: "center" },
+  declineButton: { backgroundColor: colors.dangerMuted },
+  declineButtonText: { color: colors.danger, fontSize: fontSize.md, fontWeight: "600" },
+  acceptButton: { backgroundColor: colors.primary },
+  acceptButtonText: { color: colors.textOnPrimary, fontSize: fontSize.md, fontWeight: "600" },
+  secondaryButton: { backgroundColor: colors.primaryMuted },
+  secondaryButtonText: { color: colors.primary, fontSize: fontSize.md, fontWeight: "600" },
+  error: { color: colors.danger, fontSize: fontSize.body },
+  acceptPanel: {
+    marginTop: spacing.lg,
+    gap: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.separator,
+    paddingTop: spacing.lg,
+  },
+  acceptPanelTitle: { fontSize: fontSize.md, fontWeight: "600", color: colors.textPrimary },
   choiceRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   radio: {
     width: 18,
     height: 18,
     borderRadius: 9,
     borderWidth: 2,
-    borderColor: "#999",
+    borderColor: colors.textFaint,
   },
-  radioSelected: { borderColor: "#1a7f37", backgroundColor: "#1a7f37" },
-  choiceLabel: { fontSize: 15 },
+  radioSelected: { borderColor: colors.primary, backgroundColor: colors.primary },
+  choiceLabel: { fontSize: fontSize.base, color: colors.textPrimary },
+  choiceHint: { fontSize: fontSize.sm, color: colors.textMuted, marginLeft: 28 },
 });

@@ -8,6 +8,9 @@ import type {
 } from "@taskflow/shared";
 import {
   ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,6 +31,7 @@ import {
 } from "../../../src/features/tasks/useAssignments";
 import { useDeleteTask, useTask, useUpdateTask } from "../../../src/features/tasks/useTasks";
 import { UserSearchField } from "../../../src/features/users/UserSearchField";
+import { colors, disabledOpacity, fontSize, radius, spacing } from "../../../src/ui/theme";
 
 /**
  * The task detail screen's only new M8 surface. Deliberately self-contained
@@ -68,13 +72,15 @@ function AssignmentSection({
           onPress={() => cancelAssignment.mutate(pendingAssignment.id)}
         >
           {cancelAssignment.isPending ? (
-            <ActivityIndicator color="#1a7f37" />
+            <ActivityIndicator color={colors.primary} />
           ) : (
             <Text style={styles.secondaryButtonText}>Cancel Assignment</Text>
           )}
         </TouchableOpacity>
         {cancelAssignment.isError && (
-          <Text style={styles.error}>Could not cancel — please try again.</Text>
+          <Text style={styles.error} accessibilityRole="alert">
+            Could not cancel — it may have already been resolved. Pull to refresh.
+          </Text>
         )}
       </View>
     );
@@ -103,6 +109,7 @@ function AssignmentSection({
         <TextInput
           style={styles.input}
           placeholder="Add a message (optional)"
+          placeholderTextColor={colors.textMuted}
           accessibilityLabel="Assignment message"
           value={message}
           onChangeText={setMessage}
@@ -139,14 +146,16 @@ function AssignmentSection({
           }}
         >
           {createAssignment.isPending ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={colors.textOnPrimary} />
           ) : (
             <Text style={styles.buttonText}>Send</Text>
           )}
         </TouchableOpacity>
       </View>
       {createAssignment.isError && (
-        <Text style={styles.error}>Could not send — please try again.</Text>
+        <Text style={styles.error} accessibilityRole="alert">
+          Could not send — please try again.
+        </Text>
       )}
     </View>
   );
@@ -203,10 +212,21 @@ export default function TaskDetailScreen() {
     );
   }
 
+  // Phase 7-F: stale/deleted/not-found — say so plainly rather than leaving
+  // a blank or broken-looking screen, and offer a way back.
   if (task.isError || !task.data) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.error}>Could not load this task.</Text>
+        <Text style={styles.error}>
+          This task couldn&apos;t be found — it may have been deleted.
+        </Text>
+        <TouchableOpacity
+          style={[styles.button, styles.secondaryButton, styles.backButton]}
+          accessibilityRole="button"
+          onPress={() => router.back()}
+        >
+          <Text style={styles.secondaryButtonText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -222,6 +242,22 @@ export default function TaskDetailScreen() {
   // to show the right explanatory copy, not to re-derive authorization.
   const { viewer } = task.data;
   const isFrozenByPending = viewer.isAssignee && !viewer.canEdit;
+  const hasDeadlineConflict =
+    scheduledAt !== null && deadline !== null && deadline.getTime() < scheduledAt.getTime();
+
+  function confirmDelete() {
+    // Phase 12 (destructive actions): hard-delete cascades this task's
+    // entire assignment history (EC-17) and can't be undone — a plain tap
+    // is not enough friction for that.
+    Alert.alert("Delete this task?", "This can't be undone and removes its request history.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => deleteTask.mutate(id, { onSuccess: () => router.back() }),
+      },
+    ]);
+  }
 
   // Creator-only viewer (M10): a completely different, read-only screen —
   // no edit form, no Save/Mark Done/Delete, no assign flow (only the
@@ -272,170 +308,244 @@ export default function TaskDetailScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.statusRow}>
-        <Text style={styles.status}>{task.data.status.replace("_", " ")}</Text>
-        <Text style={[styles.priorityBadge, { color: PRIORITY_COLORS[task.data.priority] }]}>
-          {priorityLabel(task.data.priority)} priority
-        </Text>
-      </View>
-
-      {isFrozenByPending && (
-        <View style={styles.frozenNotice}>
-          <Text style={styles.frozenNoticeText}>
-            Awaiting {task.data.pendingAssignment!.toUser.name}&apos;s response — editing,
-            completing, and deleting are disabled until the assignment is cancelled or resolved.
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+    >
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
+        <View style={styles.statusRow}>
+          <Text style={styles.status}>{task.data.status.replace("_", " ")}</Text>
+          <Text style={[styles.priorityBadge, { color: PRIORITY_COLORS[task.data.priority] }]}>
+            {priorityLabel(task.data.priority)} priority
           </Text>
         </View>
-      )}
 
-      <TextInput
-        style={styles.input}
-        placeholder="Title"
-        accessibilityLabel="Title"
-        value={title}
-        onChangeText={setTitle}
-        editable={viewer.canEdit}
-      />
-      <TextInput
-        style={[styles.input, styles.multiline]}
-        placeholder="Description"
-        accessibilityLabel="Description"
-        value={description}
-        onChangeText={setDescription}
-        multiline
-        editable={viewer.canEdit}
-      />
-
-      <PrioritySelector value={priority} onChange={setPriority} disabled={!viewer.canEdit} />
-
-      <TextInput
-        style={styles.input}
-        placeholder="Category (optional)"
-        accessibilityLabel="Category"
-        value={category}
-        onChangeText={setCategory}
-        editable={viewer.canEdit}
-      />
-
-      <DateTimeField
-        label="Scheduled — when you plan to do this"
-        value={scheduledAt}
-        onChange={setScheduledAt}
-        disabled={!viewer.canEdit}
-      />
-      <DateTimeField
-        label="Deadline — when it must be done by"
-        value={deadline}
-        onChange={setDeadline}
-        disabled={!viewer.canEdit}
-      />
-
-      <TouchableOpacity
-        style={[styles.button, !viewer.canEdit && styles.buttonDisabled]}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !viewer.canEdit || updateTask.isPending }}
-        disabled={!viewer.canEdit || updateTask.isPending}
-        onPress={() =>
-          updateTask.mutate({
-            title,
-            description: description.trim() || null,
-            priority,
-            category: category.trim() || null,
-            scheduledAt: scheduledAt ? scheduledAt.toISOString() : null,
-            deadline: deadline ? deadline.toISOString() : null,
-          })
-        }
-      >
-        {updateTask.isPending ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Save</Text>
+        {isFrozenByPending && (
+          <View style={styles.frozenNotice} accessibilityRole="text">
+            <Text style={styles.frozenNoticeText}>
+              Awaiting {task.data.pendingAssignment!.toUser.name}&apos;s response — editing,
+              completing, and deleting are disabled until the assignment is cancelled or resolved.
+            </Text>
+          </View>
         )}
-      </TouchableOpacity>
 
-      {updateTask.isError && (
-        <Text style={styles.error}>
-          Could not save — the task may have changed (e.g. a new pending assignment). Pull to
-          refresh and try again.
-        </Text>
-      )}
+        {task.data.status === "CANCELLED" && (
+          <View style={styles.infoNotice}>
+            <Text style={styles.infoNoticeText}>
+              This task is cancelled. Cancelling is final — it can still be edited, but not
+              reopened.
+            </Text>
+          </View>
+        )}
 
-      {nextStep && (
+        <TextInput
+          style={styles.input}
+          placeholder="Title"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Title"
+          value={title}
+          onChangeText={setTitle}
+          editable={viewer.canEdit}
+        />
+        <TextInput
+          style={[styles.input, styles.multiline]}
+          placeholder="Description"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Description"
+          value={description}
+          onChangeText={setDescription}
+          multiline
+          editable={viewer.canEdit}
+        />
+
+        <PrioritySelector value={priority} onChange={setPriority} disabled={!viewer.canEdit} />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Category (optional)"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Category"
+          value={category}
+          onChangeText={setCategory}
+          editable={viewer.canEdit}
+        />
+
+        <DateTimeField
+          label="Scheduled — when you plan to do this"
+          value={scheduledAt}
+          onChange={setScheduledAt}
+          disabled={!viewer.canEdit}
+        />
+        <DateTimeField
+          label="Deadline — when it must be done by"
+          value={deadline}
+          onChange={setDeadline}
+          disabled={!viewer.canEdit}
+        />
+        {hasDeadlineConflict && (
+          <Text style={styles.error} accessibilityRole="alert">
+            The deadline is before the scheduled time — pick a deadline on or after it.
+          </Text>
+        )}
+
         <TouchableOpacity
-          style={[styles.button, styles.secondaryButton, !viewer.canEdit && styles.buttonDisabled]}
+          style={[styles.button, (!viewer.canEdit || hasDeadlineConflict) && styles.buttonDisabled]}
           accessibilityRole="button"
-          accessibilityState={{ disabled: !viewer.canEdit || updateTask.isPending }}
-          disabled={!viewer.canEdit || updateTask.isPending}
-          onPress={() => updateTask.mutate({ status: nextStep.to })}
+          accessibilityState={{
+            disabled: !viewer.canEdit || hasDeadlineConflict || updateTask.isPending,
+          }}
+          disabled={!viewer.canEdit || hasDeadlineConflict || updateTask.isPending}
+          onPress={() =>
+            updateTask.mutate({
+              title,
+              description: description.trim() || null,
+              priority,
+              category: category.trim() || null,
+              scheduledAt: scheduledAt ? scheduledAt.toISOString() : null,
+              deadline: deadline ? deadline.toISOString() : null,
+            })
+          }
         >
-          <Text style={styles.secondaryButtonText}>{nextStep.label}</Text>
+          {updateTask.isPending ? (
+            <ActivityIndicator color={colors.textOnPrimary} />
+          ) : (
+            <Text style={styles.buttonText}>Save</Text>
+          )}
         </TouchableOpacity>
-      )}
 
-      <AssignmentSection
-        taskId={id}
-        taskStatus={task.data.status}
-        pendingAssignment={task.data.pendingAssignment}
-      />
+        {updateTask.isError && (
+          <Text style={styles.error} accessibilityRole="alert">
+            Could not save — the task may have changed (e.g. a new pending assignment). Pull to
+            refresh and try again.
+          </Text>
+        )}
 
-      <TouchableOpacity
-        style={[styles.button, styles.deleteButton, !viewer.canDelete && styles.buttonDisabled]}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: !viewer.canDelete || deleteTask.isPending }}
-        disabled={!viewer.canDelete || deleteTask.isPending}
-        onPress={() => deleteTask.mutate(id, { onSuccess: () => router.back() })}
-      >
-        <Text style={styles.deleteButtonText}>Delete</Text>
-      </TouchableOpacity>
+        {nextStep && (
+          <TouchableOpacity
+            style={[
+              styles.button,
+              styles.secondaryButton,
+              !viewer.canEdit && styles.buttonDisabled,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !viewer.canEdit || updateTask.isPending }}
+            disabled={!viewer.canEdit || updateTask.isPending}
+            onPress={() => updateTask.mutate({ status: nextStep.to })}
+          >
+            <Text style={styles.secondaryButtonText}>{nextStep.label}</Text>
+          </TouchableOpacity>
+        )}
 
-      {deleteTask.isError && <Text style={styles.error}>Could not delete — please try again.</Text>}
-    </ScrollView>
+        <AssignmentSection
+          taskId={id}
+          taskStatus={task.data.status}
+          pendingAssignment={task.data.pendingAssignment}
+        />
+
+        <TouchableOpacity
+          style={[styles.button, styles.deleteButton, !viewer.canDelete && styles.buttonDisabled]}
+          accessibilityRole="button"
+          accessibilityLabel="Delete task"
+          accessibilityState={{ disabled: !viewer.canDelete || deleteTask.isPending }}
+          disabled={!viewer.canDelete || deleteTask.isPending}
+          onPress={confirmDelete}
+        >
+          {deleteTask.isPending ? (
+            <ActivityIndicator color={colors.danger} />
+          ) : (
+            <Text style={styles.deleteButtonText}>Delete</Text>
+          )}
+        </TouchableOpacity>
+
+        {deleteTask.isError && (
+          <Text style={styles.error} accessibilityRole="alert">
+            Could not delete — please try again.
+          </Text>
+        )}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { padding: 24, gap: 16 },
-  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
+  flex: { flex: 1 },
+  container: { flex: 1, backgroundColor: colors.background },
+  content: { padding: spacing.xl, gap: spacing.lg, paddingBottom: spacing.xl * 2 },
+  centered: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.xl,
+    gap: spacing.md,
+    backgroundColor: colors.background,
+  },
+  backButton: { paddingHorizontal: spacing.xl },
   statusRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  status: { fontSize: 13, color: "#666", fontWeight: "600" },
-  priorityBadge: { fontSize: 13, fontWeight: "700" },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 12, fontSize: 16 },
+  status: { fontSize: fontSize.body, color: colors.textMuted, fontWeight: "600" },
+  priorityBadge: { fontSize: fontSize.body, fontWeight: "700" },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: fontSize.md,
+    color: colors.textPrimary,
+  },
   multiline: { minHeight: 100, textAlignVertical: "top" },
-  button: { backgroundColor: "#1a7f37", borderRadius: 8, padding: 14, alignItems: "center" },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  frozenNotice: {
-    backgroundColor: "#fff8e1",
-    borderRadius: 8,
-    padding: 12,
-  },
-  frozenNoticeText: { color: "#8a6d00", fontSize: 13, lineHeight: 18 },
-  secondaryButton: { backgroundColor: "#eef7ee" },
-  secondaryButtonText: { color: "#1a7f37", fontSize: 16, fontWeight: "600" },
-  deleteButton: { backgroundColor: "#fdecea" },
-  deleteButtonText: { color: "#c0392b", fontSize: 16, fontWeight: "600" },
-  error: { color: "#c0392b" },
-  assignmentBanner: {
-    backgroundColor: "#eef7ee",
-    borderRadius: 8,
+  button: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
     padding: 14,
-    gap: 4,
+    alignItems: "center",
   },
-  assignmentBannerLabel: { fontSize: 12, fontWeight: "700", color: "#1a7f37" },
-  assignmentBannerName: { fontSize: 16, fontWeight: "600" },
-  assignmentBannerUsername: { fontSize: 14, color: "#666", marginBottom: 8 },
-  assignPanel: { gap: 12 },
-  assignPanelActions: { flexDirection: "row", gap: 12 },
+  buttonDisabled: { opacity: disabledOpacity },
+  buttonText: { color: colors.textOnPrimary, fontSize: fontSize.md, fontWeight: "600" },
+  frozenNotice: {
+    backgroundColor: colors.warningMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  frozenNoticeText: { color: colors.warning, fontSize: fontSize.body, lineHeight: 18 },
+  infoNotice: {
+    backgroundColor: colors.infoMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  infoNoticeText: { color: colors.info, fontSize: fontSize.body, lineHeight: 18 },
+  secondaryButton: { backgroundColor: colors.primaryMuted },
+  secondaryButtonText: { color: colors.primary, fontSize: fontSize.md, fontWeight: "600" },
+  deleteButton: { backgroundColor: colors.dangerMuted },
+  deleteButtonText: { color: colors.danger, fontSize: fontSize.md, fontWeight: "600" },
+  error: { color: colors.danger, fontSize: fontSize.body },
+  assignmentBanner: {
+    backgroundColor: colors.primaryMuted,
+    borderRadius: radius.md,
+    padding: 14,
+    gap: spacing.xs,
+  },
+  assignmentBannerLabel: { fontSize: fontSize.sm, fontWeight: "700", color: colors.primary },
+  assignmentBannerName: { fontSize: fontSize.md, fontWeight: "600" },
+  assignmentBannerUsername: {
+    fontSize: fontSize.base,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  assignPanel: { gap: spacing.md },
+  assignPanelActions: { flexDirection: "row", gap: spacing.md },
   assignPanelButton: { flex: 1 },
   readOnlyNotice: {
-    backgroundColor: "#eef2f7",
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: colors.infoMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
   },
-  readOnlyNoticeText: { color: "#3a4a5c", fontSize: 13, lineHeight: 18 },
-  readOnlyTitle: { fontSize: 22, fontWeight: "700" },
-  readOnlyDescription: { fontSize: 15, color: "#333" },
-  readOnlyMeta: { fontSize: 13, color: "#666" },
+  readOnlyNoticeText: { color: colors.info, fontSize: fontSize.body, lineHeight: 18 },
+  readOnlyTitle: { fontSize: fontSize.xl, fontWeight: "700" },
+  readOnlyDescription: { fontSize: fontSize.base, color: colors.textBody },
+  readOnlyMeta: { fontSize: fontSize.body, color: colors.textMuted },
 });

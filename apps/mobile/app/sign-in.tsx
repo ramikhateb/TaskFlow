@@ -2,14 +2,17 @@ import { Link } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
 } from "react-native";
 import { ApiError } from "../src/api/client";
 import { useLogin } from "../src/features/auth/useAuth";
+import { colors, fontSize, radius, spacing } from "../src/ui/theme";
 
 export default function SignInScreen() {
   const [email, setEmail] = useState("");
@@ -22,66 +25,100 @@ export default function SignInScreen() {
       : "Something went wrong. Please try again."
     : null;
 
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !login.isPending;
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>TaskFlow</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        accessibilityLabel="Email"
-        autoCapitalize="none"
-        keyboardType="email-address"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        accessibilityLabel="Password"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-
-      {errorMessage && (
-        <Text style={styles.error} accessibilityLabel="Sign in error">
-          {errorMessage}
-        </Text>
-      )}
-
-      <TouchableOpacity
-        style={styles.button}
-        accessibilityRole="button"
-        disabled={login.isPending}
-        onPress={() => login.mutate({ email, password })}
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
-        {login.isPending ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Sign In</Text>
-        )}
-      </TouchableOpacity>
+        <Text style={styles.title}>TaskFlow</Text>
 
-      <Link href="/register" style={styles.link}>
-        Need an account? Register
-      </Link>
-    </View>
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Email"
+          autoCapitalize="none"
+          autoComplete="email"
+          keyboardType="email-address"
+          returnKeyType="next"
+          value={email}
+          onChangeText={setEmail}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Password"
+          secureTextEntry
+          autoComplete="password"
+          returnKeyType="go"
+          value={password}
+          onChangeText={setPassword}
+          onSubmitEditing={() => canSubmit && login.mutate({ email, password })}
+        />
+
+        {errorMessage && (
+          <Text style={styles.error} accessibilityLabel="Sign in error" accessibilityRole="alert">
+            {errorMessage}
+          </Text>
+        )}
+
+        <TouchableOpacity
+          style={[styles.button, !canSubmit && styles.buttonDisabled]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canSubmit }}
+          disabled={!canSubmit}
+          onPress={() => login.mutate({ email, password })}
+        >
+          {login.isPending ? (
+            <ActivityIndicator color={colors.textOnPrimary} />
+          ) : (
+            <Text style={styles.buttonText}>Sign In</Text>
+          )}
+        </TouchableOpacity>
+
+        <Link href="/register" style={styles.link}>
+          Need an account? Register
+        </Link>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 24, gap: 12 },
-  title: { fontSize: 28, fontWeight: "700", marginBottom: 12, textAlign: "center" },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 12, fontSize: 16 },
+  flex: { flex: 1, backgroundColor: colors.background },
+  container: { flexGrow: 1, justifyContent: "center", padding: spacing.xl, gap: spacing.md },
+  title: {
+    fontSize: fontSize.xxl,
+    fontWeight: "700",
+    marginBottom: spacing.md,
+    textAlign: "center",
+    color: colors.textPrimary,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: fontSize.md,
+    color: colors.textPrimary,
+  },
   button: {
-    backgroundColor: "#1a7f37",
-    borderRadius: 8,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
     padding: 14,
     alignItems: "center",
-    marginTop: 8,
+    marginTop: spacing.sm,
   },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  error: { color: "#c0392b" },
-  link: { marginTop: 16, textAlign: "center", color: "#1a7f37" },
+  buttonDisabled: { opacity: 0.4 },
+  buttonText: { color: colors.textOnPrimary, fontSize: fontSize.md, fontWeight: "600" },
+  error: { color: colors.danger, fontSize: fontSize.body },
+  link: { marginTop: spacing.lg, textAlign: "center", color: colors.primary },
 });

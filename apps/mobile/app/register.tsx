@@ -2,14 +2,17 @@ import { Link } from "expo-router";
 import { useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
 } from "react-native";
 import { ApiError } from "../src/api/client";
 import { useRegister } from "../src/features/auth/useAuth";
+import { colors, fontSize, radius, spacing } from "../src/ui/theme";
 
 interface StructuredErrorDetails {
   field?: string;
@@ -50,87 +53,133 @@ export default function RegisterScreen() {
   const register = useRegister();
 
   const errorMessage = register.isError ? getErrorMessage(register.error) : null;
+  const canSubmit =
+    name.trim().length > 0 &&
+    username.trim().length > 0 &&
+    email.trim().length > 0 &&
+    password.length > 0 &&
+    !register.isPending;
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create your account</Text>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Name"
-        accessibilityLabel="Name"
-        value={name}
-        onChangeText={setName}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Username"
-        accessibilityLabel="Username"
-        autoCapitalize="none"
-        autoCorrect={false}
-        value={username}
-        onChangeText={setUsername}
-      />
-      <Text style={styles.hint}>
-        Your @handle — lowercase letters, numbers, underscore, or period, 3-20 characters.
-      </Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        accessibilityLabel="Email"
-        autoCapitalize="none"
-        keyboardType="email-address"
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        accessibilityLabel="Password"
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
-
-      {errorMessage && (
-        <Text style={styles.error} accessibilityLabel="Registration error">
-          {errorMessage}
-        </Text>
-      )}
-
-      <TouchableOpacity
-        style={styles.button}
-        accessibilityRole="button"
-        disabled={register.isPending}
-        onPress={() => register.mutate({ name, username, email, password })}
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
-        {register.isPending ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Create Account</Text>
-        )}
-      </TouchableOpacity>
+        <Text style={styles.title}>Create your account</Text>
 
-      <Link href="/sign-in" style={styles.link}>
-        Already have an account? Sign in
-      </Link>
-    </View>
+        <TextInput
+          style={styles.input}
+          placeholder="Name"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Name"
+          returnKeyType="next"
+          value={name}
+          onChangeText={setName}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Username"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Username"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="next"
+          value={username}
+          onChangeText={setUsername}
+        />
+        <Text style={styles.hint}>
+          Your @handle — lowercase letters, numbers, underscore, or period, 3-20 characters.
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Email"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Email"
+          autoCapitalize="none"
+          autoComplete="email"
+          keyboardType="email-address"
+          returnKeyType="next"
+          value={email}
+          onChangeText={setEmail}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Password"
+          secureTextEntry
+          autoComplete="password-new"
+          returnKeyType="go"
+          value={password}
+          onChangeText={setPassword}
+          onSubmitEditing={() => canSubmit && register.mutate({ name, username, email, password })}
+        />
+
+        {errorMessage && (
+          <Text
+            style={styles.error}
+            accessibilityLabel="Registration error"
+            accessibilityRole="alert"
+          >
+            {errorMessage}
+          </Text>
+        )}
+
+        <TouchableOpacity
+          style={[styles.button, !canSubmit && styles.buttonDisabled]}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !canSubmit }}
+          disabled={!canSubmit}
+          onPress={() => register.mutate({ name, username, email, password })}
+        >
+          {register.isPending ? (
+            <ActivityIndicator color={colors.textOnPrimary} />
+          ) : (
+            <Text style={styles.buttonText}>Create Account</Text>
+          )}
+        </TouchableOpacity>
+
+        <Link href="/sign-in" style={styles.link}>
+          Already have an account? Sign in
+        </Link>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 24, gap: 12 },
-  title: { fontSize: 24, fontWeight: "700", marginBottom: 12, textAlign: "center" },
-  input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 12, fontSize: 16 },
-  hint: { fontSize: 12, color: "#666", marginTop: -6 },
+  flex: { flex: 1, backgroundColor: colors.background },
+  container: { flexGrow: 1, justifyContent: "center", padding: spacing.xl, gap: spacing.md },
+  title: {
+    fontSize: fontSize.xl,
+    fontWeight: "700",
+    marginBottom: spacing.md,
+    textAlign: "center",
+    color: colors.textPrimary,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: fontSize.md,
+    color: colors.textPrimary,
+  },
+  hint: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: -6 },
   button: {
-    backgroundColor: "#1a7f37",
-    borderRadius: 8,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
     padding: 14,
     alignItems: "center",
-    marginTop: 8,
+    marginTop: spacing.sm,
   },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-  error: { color: "#c0392b" },
-  link: { marginTop: 16, textAlign: "center", color: "#1a7f37" },
+  buttonDisabled: { opacity: 0.4 },
+  buttonText: { color: colors.textOnPrimary, fontSize: fontSize.md, fontWeight: "600" },
+  error: { color: colors.danger, fontSize: fontSize.body },
+  link: { marginTop: spacing.lg, textAlign: "center", color: colors.primary },
 });

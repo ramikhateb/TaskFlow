@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import type { TaskResponse } from "@taskflow/shared";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { colors, fontSize, spacing } from "../../ui/theme";
 import { PRIORITY_COLORS, priorityLabel } from "./PrioritySelector";
 import { useDeleteTask, useUpdateTask } from "./useTasks";
 
@@ -40,9 +41,22 @@ export function TaskRow({ task, subtitle }: TaskRowProps) {
   const resolvedSubtitle =
     subtitle ?? `${task.status.replace("_", " ")}${task.category ? ` · ${task.category}` : ""}`;
 
+  function confirmDelete() {
+    // Phase 12 (destructive actions): hard-delete cascades this task's
+    // assignment history (EC-17) and can't be undone.
+    Alert.alert("Delete this task?", `"${task.title}" can't be recovered after this.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => deleteTask.mutate(task.id) },
+    ]);
+  }
+
   return (
     <View style={styles.row}>
-      <TouchableOpacity style={styles.rowMain} onPress={() => router.push(`/tasks/${task.id}`)}>
+      <TouchableOpacity
+        style={styles.rowMain}
+        accessibilityRole="button"
+        onPress={() => router.push(`/tasks/${task.id}`)}
+      >
         <View style={styles.rowTitleLine}>
           <Text
             style={[
@@ -58,6 +72,7 @@ export function TaskRow({ task, subtitle }: TaskRowProps) {
           <Text style={[styles.rowTitle, task.status === "DONE" && styles.rowTitleDone]}>
             {task.title}
           </Text>
+          {task.status === "DONE" && <Text style={styles.doneCheck}>✓</Text>}
         </View>
         <Text style={styles.rowSubtitle}>{resolvedSubtitle}</Text>
       </TouchableOpacity>
@@ -65,7 +80,10 @@ export function TaskRow({ task, subtitle }: TaskRowProps) {
       <View style={styles.rowActions}>
         {nextStep && (
           <TouchableOpacity
+            style={styles.rowActionButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityRole="button"
+            accessibilityLabel={`${nextStep.label} — ${task.title}`}
             disabled={updateTask.isPending}
             onPress={() => updateTask.mutate({ status: nextStep.to })}
           >
@@ -73,9 +91,12 @@ export function TaskRow({ task, subtitle }: TaskRowProps) {
           </TouchableOpacity>
         )}
         <TouchableOpacity
+          style={styles.rowActionButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
+          accessibilityLabel={`Delete — ${task.title}`}
           disabled={deleteTask.isPending}
-          onPress={() => deleteTask.mutate(task.id)}
+          onPress={confirmDelete}
         >
           <Text style={styles.deleteText}>Delete</Text>
         </TouchableOpacity>
@@ -89,25 +110,27 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-    gap: 8,
+    borderBottomColor: colors.separator,
+    gap: spacing.sm,
   },
   rowMain: { flex: 1 },
-  rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  rowTitleLine: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   priorityBadge: {
-    fontSize: 10,
+    fontSize: fontSize.xs,
     fontWeight: "700",
     borderWidth: 1,
     borderRadius: 4,
-    paddingHorizontal: 4,
+    paddingHorizontal: spacing.xs,
     paddingVertical: 1,
   },
-  rowTitle: { fontSize: 16, fontWeight: "600" },
-  rowTitleDone: { textDecorationLine: "line-through", color: "#888" },
-  rowSubtitle: { fontSize: 12, color: "#666", marginTop: 2 },
-  rowActions: { flexDirection: "row", gap: 16 },
-  actionText: { color: "#1a7f37", fontWeight: "600" },
-  deleteText: { color: "#c0392b", fontWeight: "600" },
+  rowTitle: { fontSize: fontSize.md, fontWeight: "600", flexShrink: 1 },
+  rowTitleDone: { textDecorationLine: "line-through", color: colors.textMuted },
+  doneCheck: { color: colors.primary, fontWeight: "700" },
+  rowSubtitle: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
+  rowActions: { flexDirection: "row", gap: spacing.md },
+  rowActionButton: { paddingVertical: spacing.xs, paddingHorizontal: 2 },
+  actionText: { color: colors.primary, fontWeight: "600", fontSize: fontSize.body },
+  deleteText: { color: colors.danger, fontWeight: "600", fontSize: fontSize.body },
 });

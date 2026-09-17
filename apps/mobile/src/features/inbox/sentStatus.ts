@@ -1,4 +1,5 @@
 import type { AssignmentStatus } from "@taskflow/shared";
+import { colors } from "../../ui/theme";
 
 // Readable labels for the Sent list (M10) — status must never be conveyed
 // by color alone (REQUIREMENTS.md §4 Accessibility), so this label is
@@ -17,8 +18,8 @@ export function sentStatusLabel(status: AssignmentStatus): string {
 }
 
 export const SENT_STATUS_COLORS: Record<AssignmentStatus, string> = {
-  PENDING: "#b8860b",
-  ACCEPTED: "#1a7f37",
-  DECLINED: "#c0392b",
-  CANCELLED: "#888888",
+  PENDING: colors.statusPending,
+  ACCEPTED: colors.statusAccepted,
+  DECLINED: colors.statusDeclined,
+  CANCELLED: colors.statusCancelled,
 };

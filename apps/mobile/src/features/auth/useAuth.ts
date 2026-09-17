@@ -7,6 +7,7 @@ import {
   setStoredRefreshToken,
 } from "../../lib/secureStore";
 import { useSessionStore } from "../../stores/sessionStore";
+import { clearSessionCache } from "./clearSessionCache";
 
 export const ME_QUERY_KEY = ["me"] as const;
 
@@ -27,6 +28,13 @@ export function useRegister() {
   return useMutation({
     mutationFn: (input: RegisterRequest) => registerRequest(input),
     onSuccess: async (data) => {
+      // M12 (Phase 15): a previous session's cached server data (tasks,
+      // inbox, sent, search results, ...) must never be visible to whoever
+      // is signing in now — clear the whole cache before seeding the new
+      // session's own profile, not just on logout. This also covers the
+      // "session expired, user re-authenticates as someone else without an
+      // explicit logout" path, where useLogout's own clear never runs.
+      clearSessionCache(queryClient);
       await setStoredRefreshToken(data.refreshToken);
       setAccessToken(data.accessToken);
       queryClient.setQueryData(ME_QUERY_KEY, data.user);
@@ -41,6 +49,8 @@ export function useLogin() {
   return useMutation({
     mutationFn: (input: LoginRequest) => loginRequest(input),
     onSuccess: async (data) => {
+      // See useRegister above: clear any prior session's cached data first.
+      clearSessionCache(queryClient);
       await setStoredRefreshToken(data.refreshToken);
       setAccessToken(data.accessToken);
       queryClient.setQueryData(ME_QUERY_KEY, data.user);
@@ -64,7 +74,11 @@ export function useLogout() {
     onSettled: async () => {
       await clearStoredRefreshToken();
       setAccessToken(null);
-      queryClient.removeQueries({ queryKey: ME_QUERY_KEY });
+      // M12 (Phase 15): drop every cached query, not just "me" — Tasks,
+      // Today, Schedule, Inbox, Sent, and user-search results are all
+      // per-account server state and must not survive into whichever
+      // account signs in next on this device.
+      clearSessionCache(queryClient);
     },
   });
 }

@@ -1,12 +1,13 @@
 import type { TaskPriority } from "@taskflow/shared";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { colors, disabledOpacity, fontSize, radius, spacing } from "../../ui/theme";
 
 const PRIORITIES: TaskPriority[] = ["LOW", "MEDIUM", "HIGH"];
 
 export const PRIORITY_COLORS: Record<TaskPriority, string> = {
-  LOW: "#2e7d32",
-  MEDIUM: "#b8860b",
-  HIGH: "#c0392b",
+  LOW: colors.priorityLow,
+  MEDIUM: colors.priorityMedium,
+  HIGH: colors.priorityHigh,
 };
 
 // Priority must never be conveyed by color alone (REQUIREMENTS.md §4
@@ -54,17 +55,17 @@ export function PrioritySelector({ value, onChange, disabled = false }: Priority
 }
 
 const styles = StyleSheet.create({
-  container: { gap: 4 },
-  label: { fontSize: 13, color: "#666", fontWeight: "600" },
-  row: { flexDirection: "row", gap: 8 },
+  container: { gap: spacing.xs },
+  label: { fontSize: fontSize.body, color: colors.textMuted, fontWeight: "600" },
+  row: { flexDirection: "row", gap: spacing.sm },
   option: {
     flex: 1,
     borderWidth: 1.5,
-    borderRadius: 8,
+    borderRadius: radius.md,
     paddingVertical: 10,
     alignItems: "center",
   },
-  optionText: { fontSize: 13, fontWeight: "600" },
-  optionTextSelected: { color: "#fff" },
-  optionDisabled: { opacity: 0.5 },
+  optionText: { fontSize: fontSize.body, fontWeight: "600" },
+  optionTextSelected: { color: colors.textOnPrimary },
+  optionDisabled: { opacity: disabledOpacity },
 });

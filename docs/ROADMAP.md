@@ -116,14 +116,18 @@ A cross-cutting audit pass, not a feature milestone: every documented authorizat
 
 **Exit criteria**: every core domain invariant in the M11 audit brief has at least one integration test exercising it directly against the real API and database; all M2-M10 regression tests remain green; no invariant violation found remains unfixed.
 
-## M12 — Polish & Store Readiness
+## M12 — V1 Product Polish, Mobile UX, and Release Readiness
 
-- Empty/loading/error states across all screens; form validation surfaced in UI.
-- App icons, splash screens, store metadata, EAS build configuration for iOS/Android.
-- Baseline accessibility pass (labels, contrast, dynamic type).
-- Security review against ARCHITECTURE.md §6 before any store submission.
+A UX/polish and release-readiness pass across the whole mobile app, not a backend feature milestone — no schema change, no migration.
 
-**Exit criteria**: an EAS build installs and runs on a physical iOS and Android device; app is submittable to TestFlight / Play internal testing.
+- **Found and fixed one release-blocking privacy bug**: `useLogout` only removed the `me` query from the TanStack Query cache, leaving Tasks/Today/Schedule/Inbox/Sent/user-search results cached; a different account signing in on the same device could momentarily see the previous account's cached server data. Fixed by clearing the entire query cache (`clearSessionCache`, a thin wrapper kept just for its own unit test) on logout **and** on login/register success, so the fix also covers "session expired, someone else signs in without an explicit logout."
+- **Design tokens**: consolidated the ~10 hardcoded hex colors/spacing/radius values every screen had been independently re-declaring since M2-M11 into `apps/mobile/src/ui/theme.ts`, and repointed every screen/component at them — one file now defines the app's palette, spacing scale, and type scale.
+- **UX/ergonomics fixes across the app**: keyboard-avoiding forms (sign-in, register, create/edit task) so the keyboard never covers the submit button; a destructive-action confirmation before task deletion (`Alert.alert`, since v1 hard-delete cascades assignment history — EC-17); larger touch targets (`hitSlop`) on small text-only row actions; a not-found/error state with a way back on task detail and the Inbox request-detail screen; richer Today/Tasks/Sent empty and status states (readable status text plus a non-color status dot, section counts, a "you're all clear" empty state); live before-submit feedback for `deadline < scheduledAt` on both create and edit, mirroring the server's existing EC-13 validation; corrected stale M7-era copy on Find People that claimed assignment wasn't available yet (it has been since M8).
+- **No change** to Today/Schedule semantics, the acceptance transaction, user-search rules, navigation structure (still five tabs), or any authorization/state-machine invariant from M2-M11 — this milestone is presentation-layer only.
+- **Release readiness reviewed, not executed**: `docs/RELEASE.md` (new) documents what's needed for EAS internal builds and eventual store submission and lists the owner decisions this milestone deliberately did not invent (final product name, iOS bundle id / Android package, developer account ownership, final icon/splash art, privacy policy). No EAS project, certificates, or store listings were created.
+- **README.md** (new, repo root) added — setup, environment, Docker/Postgres, migrations, running both apps, physical-device LAN-IP workflow, test/quality commands.
+
+**Exit criteria**: the mobile app is visually consistent and free of the UX gaps found in the M12 audit; the account-switch privacy bug is fixed and regression-tested; the repository is understandable to a new developer from the README; and the remaining store-submission blockers are explicitly documented as owner decisions rather than left implicit. An installable EAS build was explicitly **not** produced in M12, since doing so would require inventing a bundle identifier/developer account M12 has no authority to choose — see `docs/RELEASE.md`.
 
 ## Deferred — Not Scheduled Yet
 

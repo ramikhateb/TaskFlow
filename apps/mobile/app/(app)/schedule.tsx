@@ -11,6 +11,7 @@ import {
 import { getLocalDayBoundaries } from "../../src/features/tasks/dateBoundaries";
 import { TaskRow } from "../../src/features/tasks/TaskRow";
 import { useSchedule } from "../../src/features/tasks/useTasks";
+import { colors, fontSize, spacing } from "../../src/ui/theme";
 
 function addDays(date: Date, days: number): Date {
   const next = new Date(date);
@@ -49,19 +50,24 @@ export default function ScheduleScreen() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const range = getLocalDayBoundaries(selectedDate);
   const schedule = useSchedule(range);
+  const isToday = isSameLocalDay(selectedDate, new Date());
 
   return (
     <View style={styles.container}>
       <View style={styles.nav}>
         <TouchableOpacity
+          style={styles.navTouch}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
           accessibilityLabel="Previous day"
           onPress={() => setSelectedDate((d) => addDays(d, -1))}
         >
           <Text style={styles.navButton}>‹ Prev</Text>
         </TouchableOpacity>
-        <Text style={styles.dateLabel}>{formatDay(selectedDate)}</Text>
+        <Text style={styles.dateLabel}>{isToday ? "Today" : formatDay(selectedDate)}</Text>
         <TouchableOpacity
+          style={styles.navTouch}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           accessibilityRole="button"
           accessibilityLabel="Next day"
           onPress={() => setSelectedDate((d) => addDays(d, 1))}
@@ -70,14 +76,16 @@ export default function ScheduleScreen() {
         </TouchableOpacity>
       </View>
 
-      {!isSameLocalDay(selectedDate, new Date()) && (
+      {!isToday && (
         <TouchableOpacity accessibilityRole="button" onPress={() => setSelectedDate(new Date())}>
           <Text style={styles.todayLink}>Jump to Today</Text>
         </TouchableOpacity>
       )}
 
       {schedule.isLoading && <ActivityIndicator style={styles.spacer} />}
-      {schedule.isError && <Text style={styles.error}>Could not load the schedule.</Text>}
+      {schedule.isError && (
+        <Text style={styles.error}>Could not load the schedule. Pull to refresh.</Text>
+      )}
 
       <ScrollView
         contentContainerStyle={styles.list}
@@ -86,7 +94,9 @@ export default function ScheduleScreen() {
         }
       >
         {schedule.data && schedule.data.length === 0 && (
-          <Text style={styles.empty}>Nothing scheduled for this day.</Text>
+          <Text style={styles.empty}>
+            {isToday ? "Nothing scheduled for today." : "Nothing scheduled for this day."}
+          </Text>
         )}
         {schedule.data?.map((task) => (
           <TaskRow
@@ -105,13 +115,14 @@ export default function ScheduleScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff", padding: 24, gap: 12 },
+  container: { flex: 1, backgroundColor: colors.background, padding: spacing.xl, gap: spacing.md },
   nav: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  navButton: { color: "#1a7f37", fontWeight: "600", fontSize: 15 },
-  dateLabel: { fontSize: 16, fontWeight: "700" },
-  todayLink: { color: "#666", textAlign: "center", textDecorationLine: "underline" },
-  spacer: { marginTop: 24 },
-  error: { color: "#c0392b", marginTop: 24, textAlign: "center" },
-  empty: { color: "#666", textAlign: "center", marginTop: 24 },
-  list: { gap: 4, paddingBottom: 24 },
+  navTouch: { paddingVertical: spacing.xs },
+  navButton: { color: colors.primary, fontWeight: "600", fontSize: fontSize.base },
+  dateLabel: { fontSize: fontSize.md, fontWeight: "700", color: colors.textPrimary },
+  todayLink: { color: colors.textMuted, textAlign: "center", textDecorationLine: "underline" },
+  spacer: { marginTop: spacing.xl },
+  error: { color: colors.danger, marginTop: spacing.xl, textAlign: "center" },
+  empty: { color: colors.textMuted, textAlign: "center", marginTop: spacing.xl },
+  list: { gap: spacing.xs, paddingBottom: spacing.xl },
 });

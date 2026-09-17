@@ -1,6 +1,7 @@
 import type { TaskPriority, TaskStatus } from "@taskflow/shared";
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTaskFilterStore } from "../../stores/taskFilterStore";
+import { colors, fontSize, radius, spacing } from "../../ui/theme";
 import { FilterChipRow } from "./FilterChipRow";
 import { useAvailableCategories } from "./useTasks";
 
@@ -91,20 +92,20 @@ export function TaskFilterModal({ visible, onClose }: TaskFilterModalProps) {
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 24,
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.xl,
     maxHeight: "75%",
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
-  title: { fontSize: 18, fontWeight: "700" },
-  doneText: { color: "#1a7f37", fontWeight: "600", fontSize: 15 },
-  clearButton: { alignItems: "center", paddingVertical: 12, marginTop: 4 },
-  clearText: { color: "#c0392b", fontWeight: "600" },
+  title: { fontSize: fontSize.lg, fontWeight: "700", color: colors.textPrimary },
+  doneText: { color: colors.primary, fontWeight: "600", fontSize: fontSize.base },
+  clearButton: { alignItems: "center", paddingVertical: spacing.md, marginTop: spacing.xs },
+  clearText: { color: colors.danger, fontWeight: "600" },
 });

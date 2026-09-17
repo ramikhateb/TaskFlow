@@ -1,6 +1,7 @@
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { useState } from "react";
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { colors, disabledOpacity, fontSize, radius, spacing } from "../../ui/theme";
 
 interface DateTimeFieldProps {
   label: string;
@@ -65,6 +66,8 @@ export function DateTimeField({ label, value, onChange, disabled = false }: Date
         </TouchableOpacity>
         {value && (
           <TouchableOpacity
+            style={styles.clearTouch}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityRole="button"
             accessibilityLabel={`Clear ${label}`}
             accessibilityState={{ disabled }}
@@ -98,17 +101,18 @@ function formatDateTime(date: Date): string {
 }
 
 const styles = StyleSheet.create({
-  container: { gap: 4 },
-  label: { fontSize: 13, color: "#666", fontWeight: "600" },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
+  container: { gap: spacing.xs },
+  label: { fontSize: fontSize.body, color: colors.textMuted, fontWeight: "600" },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   valueButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 12,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
   },
-  valueButtonDisabled: { opacity: 0.5 },
-  valueText: { fontSize: 16 },
-  clearText: { color: "#c0392b", fontWeight: "600" },
+  valueButtonDisabled: { opacity: disabledOpacity },
+  valueText: { fontSize: fontSize.md, color: colors.textPrimary },
+  clearTouch: { paddingVertical: spacing.xs, paddingHorizontal: 2 },
+  clearText: { color: colors.danger, fontWeight: "600" },
 });

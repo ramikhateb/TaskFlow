@@ -1,4 +1,5 @@
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { colors, fontSize, radius, spacing } from "../../ui/theme";
 
 interface FilterOption<T> {
   label: string;
@@ -40,17 +41,19 @@ export function FilterChipRow<T>({ label, options, value, onChange }: FilterChip
 }
 
 const styles = StyleSheet.create({
-  section: { gap: 8, marginBottom: 20 },
-  sectionLabel: { fontSize: 13, color: "#666", fontWeight: "600" },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  section: { gap: spacing.sm, marginBottom: spacing.xl - 4 },
+  sectionLabel: { fontSize: fontSize.body, color: colors.textMuted, fontWeight: "600" },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   chip: {
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 16,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.sm - 2,
+    paddingHorizontal: spacing.md,
+    minHeight: 32,
+    justifyContent: "center",
   },
-  chipSelected: { backgroundColor: "#1a7f37", borderColor: "#1a7f37" },
-  chipText: { fontSize: 13, color: "#333" },
-  chipTextSelected: { color: "#fff", fontWeight: "600" },
+  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  chipText: { fontSize: fontSize.body, color: colors.textBody },
+  chipTextSelected: { color: colors.textOnPrimary, fontWeight: "600" },
 });

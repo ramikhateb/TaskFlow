@@ -15,6 +15,7 @@ import { hasActiveTaskFilters, useTaskFilterStore } from "../../src/stores/taskF
 import { TaskFilterModal } from "../../src/features/tasks/TaskFilterModal";
 import { TaskRow } from "../../src/features/tasks/TaskRow";
 import { useTasks } from "../../src/features/tasks/useTasks";
+import { colors, fontSize, radius, spacing } from "../../src/ui/theme";
 
 const SEARCH_DEBOUNCE_MS = 400;
 
@@ -61,14 +62,16 @@ export default function TaskListScreen() {
         <TextInput
           style={styles.searchInput}
           placeholder="Search tasks..."
+          placeholderTextColor={colors.textMuted}
           accessibilityLabel="Search tasks"
+          returnKeyType="search"
           value={searchDraft}
           onChangeText={setSearchDraft}
         />
         <TouchableOpacity
           style={[styles.filterButton, filtersActive && styles.filterButtonActive]}
           accessibilityRole="button"
-          accessibilityLabel="Filters"
+          accessibilityLabel={filtersActive ? "Filters (active)" : "Filters"}
           onPress={() => setFilterModalVisible(true)}
         >
           <Text style={[styles.filterButtonText, filtersActive && styles.filterButtonTextActive]}>
@@ -119,6 +122,7 @@ export default function TaskListScreen() {
           keyExtractor={(task) => task.id}
           renderItem={({ item }) => <TaskRow task={item} />}
           style={styles.list}
+          keyboardShouldPersistTaps="handled"
         />
       )}
 
@@ -130,41 +134,47 @@ export default function TaskListScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#fff", padding: 24 },
-  title: { fontSize: 28, fontWeight: "700" },
-  searchRow: { flexDirection: "row", gap: 8, marginTop: 16 },
+  container: { flex: 1, backgroundColor: colors.background, padding: spacing.xl },
+  title: { fontSize: fontSize.xxl, fontWeight: "700", color: colors.textPrimary },
+  searchRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
   searchInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 15,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
   },
   filterButton: {
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
     justifyContent: "center",
   },
-  filterButtonActive: { backgroundColor: "#1a7f37", borderColor: "#1a7f37" },
-  filterButtonText: { color: "#333", fontWeight: "600", fontSize: 13 },
-  filterButtonTextActive: { color: "#fff" },
-  clearAllLink: { color: "#c0392b", fontWeight: "600", marginTop: 8, fontSize: 13 },
-  newButton: {
-    backgroundColor: "#1a7f37",
-    borderRadius: 8,
-    padding: 12,
-    alignItems: "center",
-    marginTop: 16,
+  filterButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  filterButtonText: { color: colors.textBody, fontWeight: "600", fontSize: fontSize.body },
+  filterButtonTextActive: { color: colors.textOnPrimary },
+  clearAllLink: {
+    color: colors.danger,
+    fontWeight: "600",
+    marginTop: spacing.sm,
+    fontSize: fontSize.body,
   },
-  newButtonText: { color: "#fff", fontWeight: "600", fontSize: 15 },
-  spacer: { marginTop: 24 },
-  emptyBlock: { marginTop: 24, alignItems: "center", gap: 8 },
-  emptyInBlock: { color: "#666", textAlign: "center" },
-  empty: { marginTop: 24, color: "#666", textAlign: "center" },
-  error: { marginTop: 24, color: "#c0392b", textAlign: "center" },
-  list: { marginTop: 16 },
+  newButton: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    alignItems: "center",
+    marginTop: spacing.lg,
+  },
+  newButtonText: { color: colors.textOnPrimary, fontWeight: "600", fontSize: fontSize.base },
+  spacer: { marginTop: spacing.xl },
+  emptyBlock: { marginTop: spacing.xl, alignItems: "center", gap: spacing.sm },
+  emptyInBlock: { color: colors.textMuted, textAlign: "center" },
+  empty: { marginTop: spacing.xl, color: colors.textMuted, textAlign: "center" },
+  error: { marginTop: spacing.xl, color: colors.danger, textAlign: "center" },
+  list: { marginTop: spacing.lg },
 });
