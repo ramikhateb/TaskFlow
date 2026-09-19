@@ -14,10 +14,12 @@ import { useDebouncedValue } from "../../src/lib/useDebouncedValue";
 import { hasActiveTaskFilters, useTaskFilterStore } from "../../src/stores/taskFilterStore";
 import { TaskFilterModal } from "../../src/features/tasks/TaskFilterModal";
 import { TaskCard } from "../../src/features/tasks/TaskCard";
+import { TASK_VIEW_OPTIONS, filterTasksByView } from "../../src/features/tasks/taskView";
 import { useTasks } from "../../src/features/tasks/useTasks";
 import { EmptyState } from "../../src/ui/EmptyState";
 import { IconButton } from "../../src/ui/IconButton";
 import { Screen } from "../../src/ui/Screen";
+import { SegmentedControl } from "../../src/ui/SegmentedControl";
 import { colors, fontFamily, fontSize, radius, spacing } from "../../src/ui/theme";
 
 const SEARCH_DEBOUNCE_MS = 400;
@@ -26,11 +28,11 @@ export default function TaskListScreen() {
   const router = useRouter();
   const [filterModalVisible, setFilterModalVisible] = useState(false);
 
-  const status = useTaskFilterStore((s) => s.status);
+  const view = useTaskFilterStore((s) => s.view);
   const priority = useTaskFilterStore((s) => s.priority);
   const category = useTaskFilterStore((s) => s.category);
   const activeQuery = useTaskFilterStore((s) => s.q);
-  const setStatus = useTaskFilterStore((s) => s.setStatus);
+  const setView = useTaskFilterStore((s) => s.setView);
   const setPriority = useTaskFilterStore((s) => s.setPriority);
   const setCategory = useTaskFilterStore((s) => s.setCategory);
   const setQuery = useTaskFilterStore((s) => s.setQuery);
@@ -47,23 +49,22 @@ export default function TaskListScreen() {
     setQuery(debouncedQuery);
   }, [debouncedQuery, setQuery]);
 
-  const filtersActive = hasActiveTaskFilters({ status, priority, category, q: activeQuery });
+  const filtersActive = hasActiveTaskFilters({ priority, category, q: activeQuery });
   const activeFilterChips = [
-    status && {
-      key: "status",
-      label: status.replace("_", " ").toLowerCase(),
-      clear: () => setStatus(null),
-    },
     priority && { key: "priority", label: priority.toLowerCase(), clear: () => setPriority(null) },
     category && { key: "category", label: category, clear: () => setCategory(null) },
   ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
 
+  // The All/Active/Completed split is client-side (see taskView.ts) over
+  // whatever the server already returned for the priority/category/search
+  // filters — there's no single status filter that expresses "TODO or
+  // IN_PROGRESS" in one request.
   const tasks = useTasks({
-    status: status ?? undefined,
     priority: priority ?? undefined,
     category: category ?? undefined,
     q: activeQuery,
   });
+  const viewTasks = tasks.data ? filterTasksByView(tasks.data, view) : undefined;
 
   function clearEverything() {
     clearAll();
@@ -95,6 +96,10 @@ export default function TaskListScreen() {
           accessibilityLabel={filtersActive ? "Filters (active)" : "Filters"}
           onPress={() => setFilterModalVisible(true)}
         />
+      </View>
+
+      <View style={styles.viewTabs}>
+        <SegmentedControl options={TASK_VIEW_OPTIONS} value={view} onChange={setView} />
       </View>
 
       {activeFilterChips.length > 0 && (
@@ -134,7 +139,7 @@ export default function TaskListScreen() {
         </Text>
       )}
 
-      {tasks.data && tasks.data.length === 0 && filtersActive && (
+      {viewTasks && viewTasks.length === 0 && filtersActive && (
         <EmptyState
           icon="search-outline"
           title="No matching tasks"
@@ -142,7 +147,7 @@ export default function TaskListScreen() {
         />
       )}
 
-      {tasks.data && tasks.data.length === 0 && !filtersActive && (
+      {viewTasks && viewTasks.length === 0 && !filtersActive && view === "all" && (
         <EmptyState
           icon="checkbox-outline"
           title="No tasks yet"
@@ -150,9 +155,25 @@ export default function TaskListScreen() {
         />
       )}
 
-      {tasks.data && tasks.data.length > 0 && (
+      {viewTasks && viewTasks.length === 0 && !filtersActive && view === "active" && (
+        <EmptyState
+          icon="checkbox-outline"
+          title="Nothing active"
+          subtitle="Tasks you haven't finished yet will appear here."
+        />
+      )}
+
+      {viewTasks && viewTasks.length === 0 && !filtersActive && view === "completed" && (
+        <EmptyState
+          icon="checkmark-circle-outline"
+          title="No completed tasks yet"
+          subtitle="Tasks you mark done will appear here."
+        />
+      )}
+
+      {viewTasks && viewTasks.length > 0 && (
         <FlatList
-          data={tasks.data}
+          data={viewTasks}
           keyExtractor={(task) => task.id}
           renderItem={({ item }) => <TaskCard task={item} />}
           contentContainerStyle={styles.list}
@@ -185,7 +206,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing.sm,
     paddingHorizontal: spacing.xl,
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
   },
   searchRow: {
     flex: 1,
@@ -200,6 +221,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   searchInput: { flex: 1, fontSize: fontSize.body, color: colors.textPrimary },
+  viewTabs: { paddingHorizontal: spacing.xl, marginTop: spacing.md },
   chipRow: {
     paddingHorizontal: spacing.xl,
     gap: spacing.sm,

@@ -1,14 +1,10 @@
 import { hasActiveTaskFilters } from "../../src/stores/taskFilterStore";
 
-const EMPTY = { status: null, priority: null, category: null, q: "" };
+const EMPTY = { priority: null, category: null, q: "" };
 
 describe("hasActiveTaskFilters", () => {
   it("is false when nothing is set", () => {
     expect(hasActiveTaskFilters(EMPTY)).toBe(false);
-  });
-
-  it("is true when status is set", () => {
-    expect(hasActiveTaskFilters({ ...EMPTY, status: "DONE" })).toBe(true);
   });
 
   it("is true when priority is set", () => {
@@ -28,8 +24,6 @@ describe("hasActiveTaskFilters", () => {
   });
 
   it("is true when multiple filters are combined", () => {
-    expect(
-      hasActiveTaskFilters({ status: "TODO", priority: "HIGH", category: "Work", q: "report" }),
-    ).toBe(true);
+    expect(hasActiveTaskFilters({ priority: "HIGH", category: "Work", q: "report" })).toBe(true);
   });
 });

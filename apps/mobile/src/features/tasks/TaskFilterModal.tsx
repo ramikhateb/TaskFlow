@@ -1,17 +1,9 @@
-import type { TaskPriority, TaskStatus } from "@taskflow/shared";
+import type { TaskPriority } from "@taskflow/shared";
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useTaskFilterStore } from "../../stores/taskFilterStore";
 import { colors, fontSize, radius, spacing } from "../../ui/theme";
 import { FilterChipRow } from "./FilterChipRow";
 import { useAvailableCategories } from "./useTasks";
-
-const STATUS_OPTIONS: { label: string; value: TaskStatus | null }[] = [
-  { label: "All", value: null },
-  { label: "To Do", value: "TODO" },
-  { label: "In Progress", value: "IN_PROGRESS" },
-  { label: "Done", value: "DONE" },
-  { label: "Cancelled", value: "CANCELLED" },
-];
 
 const PRIORITY_OPTIONS: { label: string; value: TaskPriority | null }[] = [
   { label: "All", value: null },
@@ -26,10 +18,8 @@ interface TaskFilterModalProps {
 }
 
 export function TaskFilterModal({ visible, onClose }: TaskFilterModalProps) {
-  const status = useTaskFilterStore((s) => s.status);
   const priority = useTaskFilterStore((s) => s.priority);
   const category = useTaskFilterStore((s) => s.category);
-  const setStatus = useTaskFilterStore((s) => s.setStatus);
   const setPriority = useTaskFilterStore((s) => s.setPriority);
   const setCategory = useTaskFilterStore((s) => s.setCategory);
   const clearAll = useTaskFilterStore((s) => s.clearAll);
@@ -54,12 +44,6 @@ export function TaskFilterModal({ visible, onClose }: TaskFilterModalProps) {
           </View>
 
           <ScrollView>
-            <FilterChipRow
-              label="Status"
-              options={STATUS_OPTIONS}
-              value={status}
-              onChange={setStatus}
-            />
             <FilterChipRow
               label="Priority"
               options={PRIORITY_OPTIONS}
