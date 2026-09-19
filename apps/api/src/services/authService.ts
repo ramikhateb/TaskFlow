@@ -1,5 +1,11 @@
 import type { RefreshToken, User } from "@prisma/client";
-import type { AuthResponse, LoginRequest, RegisterRequest, UserProfile } from "@taskflow/shared";
+import type {
+  AuthResponse,
+  LoginRequest,
+  RegisterRequest,
+  UpdateProfileRequest,
+  UserProfile,
+} from "@taskflow/shared";
 import type { Env } from "../env";
 import { ConflictError, NotFoundError, UnauthenticatedError } from "../errors";
 import { hashPassword, verifyPassword } from "../lib/password";
@@ -22,6 +28,7 @@ export interface UserRepository {
     name: string;
     username: string;
   }): Promise<User>;
+  updateProfile(id: string, data: Partial<{ name: string; bio: string | null }>): Promise<User>;
 }
 
 export interface RefreshTokenRepository {
@@ -45,7 +52,13 @@ export interface AuthServiceDeps {
 const GENERIC_LOGIN_ERROR = "Invalid email or password";
 
 function toUserProfile(user: User): UserProfile {
-  return { id: user.id, email: user.email, name: user.name, username: user.username };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    username: user.username,
+    bio: user.bio,
+  };
 }
 
 export function createAuthService({
@@ -168,7 +181,16 @@ export function createAuthService({
     return toUserProfile(user);
   }
 
-  return { register, login, refresh, logout, getProfile };
+  // Deliberately name/bio only — username is a separate, one-way identity
+  // decision (FR-1a) with its own uniqueness/normalization rules, and email
+  // is the sign-in credential; neither belongs behind this general-purpose
+  // "edit your profile" endpoint.
+  async function updateProfile(userId: string, input: UpdateProfileRequest): Promise<UserProfile> {
+    const user = await userRepository.updateProfile(userId, input);
+    return toUserProfile(user);
+  }
+
+  return { register, login, refresh, logout, getProfile, updateProfile };
 }
 
 export type AuthService = ReturnType<typeof createAuthService>;

@@ -42,18 +42,19 @@ export function FilterChipRow<T>({ label, options, value, onChange }: FilterChip
 
 const styles = StyleSheet.create({
   section: { gap: spacing.sm, marginBottom: spacing.xl - 4 },
-  sectionLabel: { fontSize: fontSize.body, color: colors.textMuted, fontWeight: "600" },
+  sectionLabel: { fontSize: fontSize.meta, color: colors.textSecondary, fontWeight: "600" },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   chip: {
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
     paddingVertical: spacing.sm - 2,
     paddingHorizontal: spacing.md,
-    minHeight: 32,
+    minHeight: 34,
     justifyContent: "center",
   },
-  chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  chipText: { fontSize: fontSize.body, color: colors.textBody },
-  chipTextSelected: { color: colors.textOnPrimary, fontWeight: "600" },
+  chipSelected: { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+  chipText: { fontSize: fontSize.meta, color: colors.textSecondary },
+  chipTextSelected: { color: colors.primaryPressed, fontWeight: "600" },
 });

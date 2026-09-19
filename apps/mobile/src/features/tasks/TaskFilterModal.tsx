@@ -90,11 +90,11 @@ export function TaskFilterModal({ visible, onClose }: TaskFilterModalProps) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "flex-end" },
+  backdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     padding: spacing.xl,
     maxHeight: "75%",
   },
@@ -104,8 +104,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.lg,
   },
-  title: { fontSize: fontSize.lg, fontWeight: "700", color: colors.textPrimary },
-  doneText: { color: colors.primary, fontWeight: "600", fontSize: fontSize.base },
+  title: { fontSize: fontSize.sectionTitle, fontWeight: "700", color: colors.textPrimary },
+  doneText: { color: colors.primary, fontWeight: "600", fontSize: fontSize.body },
   clearButton: { alignItems: "center", paddingVertical: spacing.md, marginTop: spacing.xs },
   clearText: { color: colors.danger, fontWeight: "600" },
 });

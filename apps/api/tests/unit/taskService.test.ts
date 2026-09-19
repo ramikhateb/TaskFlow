@@ -22,6 +22,7 @@ function makeFakeUser(overrides: Partial<User> = {}): User {
     passwordHash: "hash",
     name: "X",
     username: "userx",
+    bio: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

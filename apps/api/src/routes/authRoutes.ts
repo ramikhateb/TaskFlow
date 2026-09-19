@@ -4,6 +4,7 @@ import {
   logoutRequestSchema,
   refreshRequestSchema,
   registerRequestSchema,
+  updateProfileRequestSchema,
 } from "@taskflow/shared";
 import type { Env } from "../env";
 import { createAuthController } from "../controllers/authController";
@@ -23,6 +24,12 @@ export function createAuthRoutes(env: Env): Router {
   router.post("/refresh", validateBody(refreshRequestSchema), controller.refresh);
   router.post("/logout", validateBody(logoutRequestSchema), controller.logout);
   router.get("/me", requireAuth(env), controller.me);
+  router.patch(
+    "/me",
+    requireAuth(env),
+    validateBody(updateProfileRequestSchema),
+    controller.updateMe,
+  );
 
   return router;
 }

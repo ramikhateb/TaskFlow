@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { useState } from "react";
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -8,10 +9,12 @@ interface DateTimeFieldProps {
   value: Date | null;
   onChange: (value: Date | null) => void;
   disabled?: boolean;
+  icon?: keyof typeof Ionicons.glyphMap;
 }
 
 /**
- * A labeled "set/clear" control for an optional date+time value.
+ * A labeled "set/clear" control for an optional date+time value, shown as an
+ * icon + readable-value row rather than a raw input.
  *
  * @react-native-community/datetimepicker's Android implementation only
  * supports a single mode ("date" or "time") per dialog — it has no combined
@@ -19,7 +22,13 @@ interface DateTimeFieldProps {
  * one combined picker; Android does a two-step date-then-time flow, merging
  * the results into one Date. Confirmed compatible with Expo Go on SDK 57.
  */
-export function DateTimeField({ label, value, onChange, disabled = false }: DateTimeFieldProps) {
+export function DateTimeField({
+  label,
+  value,
+  onChange,
+  disabled = false,
+  icon = "calendar-outline",
+}: DateTimeFieldProps) {
   const [activeMode, setActiveMode] = useState<"date" | "time" | null>(null);
   const [pendingDate, setPendingDate] = useState<Date | null>(null);
 
@@ -62,7 +71,15 @@ export function DateTimeField({ label, value, onChange, disabled = false }: Date
           disabled={disabled}
           onPress={() => setActiveMode("date")}
         >
-          <Text style={styles.valueText}>{value ? formatDateTime(value) : "Not set"}</Text>
+          <Ionicons
+            name={icon}
+            size={17}
+            color={value ? colors.primary : colors.textMuted}
+            style={styles.icon}
+          />
+          <Text style={[styles.valueText, !value && styles.placeholderText]}>
+            {value ? formatDateTime(value) : "Not set"}
+          </Text>
         </TouchableOpacity>
         {value && (
           <TouchableOpacity
@@ -74,7 +91,7 @@ export function DateTimeField({ label, value, onChange, disabled = false }: Date
             disabled={disabled}
             onPress={() => onChange(null)}
           >
-            <Text style={styles.clearText}>Clear</Text>
+            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
           </TouchableOpacity>
         )}
       </View>
@@ -102,17 +119,23 @@ function formatDateTime(date: Date): string {
 
 const styles = StyleSheet.create({
   container: { gap: spacing.xs },
-  label: { fontSize: fontSize.body, color: colors.textMuted, fontWeight: "600" },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  label: { fontSize: fontSize.meta, color: colors.textSecondary, fontWeight: "600" },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   valueButton: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    padding: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surface,
   },
   valueButtonDisabled: { opacity: disabledOpacity },
-  valueText: { fontSize: fontSize.md, color: colors.textPrimary },
-  clearTouch: { paddingVertical: spacing.xs, paddingHorizontal: 2 },
-  clearText: { color: colors.danger, fontWeight: "600" },
+  icon: { width: 18 },
+  valueText: { fontSize: fontSize.body, color: colors.textPrimary },
+  placeholderText: { color: colors.textMuted },
+  clearTouch: { padding: 2 },
 });

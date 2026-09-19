@@ -61,7 +61,7 @@ describe("POST /auth/register", () => {
 
     expect(res.body).not.toHaveProperty("passwordHash");
     expect(res.body.user).not.toHaveProperty("passwordHash");
-    expect(Object.keys(res.body.user)).toEqual(["id", "email", "name", "username"]);
+    expect(Object.keys(res.body.user)).toEqual(["id", "email", "name", "username", "bio"]);
     expect(JSON.stringify(res.body)).not.toContain("passwordHash");
   });
 
@@ -210,7 +210,7 @@ describe("POST /auth/login", () => {
     expect(serialized).not.toContain("passwordHash");
     expect(serialized).not.toContain("tokenHash");
     expect(serialized).not.toContain("familyId");
-    expect(Object.keys(res.body.user)).toEqual(["id", "email", "name", "username"]);
+    expect(Object.keys(res.body.user)).toEqual(["id", "email", "name", "username", "bio"]);
   });
 
   it("rejects a wrong password with a generic 401 message", async () => {
@@ -246,6 +246,7 @@ describe("GET /auth/me", () => {
       email: validRegistration.email,
       name: "Alice",
       username: "alice",
+      bio: null,
     });
   });
 
@@ -291,6 +292,117 @@ describe("GET /auth/me", () => {
       expect(res.body.error.code).toBe("UNAUTHENTICATED");
     },
   );
+});
+
+describe("PATCH /auth/me", () => {
+  async function registerAndGetToken() {
+    const { body } = await request(app).post("/auth/register").send(validRegistration);
+    return { accessToken: body.accessToken as string, userId: body.user.id as string };
+  }
+
+  it("updates the caller's name", async () => {
+    const { accessToken } = await registerAndGetToken();
+
+    const res = await request(app)
+      .patch("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ name: "Alice Cooper" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("Alice Cooper");
+    expect(res.body.username).toBe("alice");
+    expect(res.body.bio).toBeNull();
+  });
+
+  it("sets and then clears the bio", async () => {
+    const { accessToken } = await registerAndGetToken();
+
+    const setRes = await request(app)
+      .patch("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ bio: "CS graduate | Building products" });
+    expect(setRes.status).toBe(200);
+    expect(setRes.body.bio).toBe("CS graduate | Building products");
+
+    // Omitting name here must leave it untouched — PATCH semantics, not PUT.
+    expect(setRes.body.name).toBe("Alice");
+
+    const clearRes = await request(app)
+      .patch("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ bio: null });
+    expect(clearRes.status).toBe(200);
+    expect(clearRes.body.bio).toBeNull();
+  });
+
+  it("persists across a subsequent GET /auth/me", async () => {
+    const { accessToken } = await registerAndGetToken();
+
+    await request(app)
+      .patch("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ name: "Ally", bio: "Always learning" });
+
+    const res = await request(app).get("/auth/me").set("Authorization", `Bearer ${accessToken}`);
+
+    expect(res.body.name).toBe("Ally");
+    expect(res.body.bio).toBe("Always learning");
+  });
+
+  it("rejects an empty name with 400", async () => {
+    const { accessToken } = await registerAndGetToken();
+
+    const res = await request(app)
+      .patch("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ name: "" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects a bio longer than 160 characters with 400", async () => {
+    const { accessToken } = await registerAndGetToken();
+
+    const res = await request(app)
+      .patch("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ bio: "x".repeat(161) });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects an empty body with 400 (at least one field required)", async () => {
+    const { accessToken } = await registerAndGetToken();
+
+    const res = await request(app)
+      .patch("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects an unauthenticated request with 401", async () => {
+    const res = await request(app).patch("/auth/me").send({ name: "Nope" });
+    expect(res.status).toBe(401);
+  });
+
+  it("silently strips unknown/protected fields rather than applying them", async () => {
+    const { accessToken, userId } = await registerAndGetToken();
+
+    const res = await request(app)
+      .patch("/auth/me")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ name: "Alice B", username: "hacker", email: "new@example.com", id: "other-id" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(userId);
+    expect(res.body.username).toBe("alice");
+    expect(res.body.email).toBe(validRegistration.email);
+    expect(res.body.passwordHash).toBeUndefined();
+  });
 });
 
 describe("POST /auth/refresh", () => {

@@ -15,6 +15,7 @@ export function createFakeUserRepository() {
       id: randomUUID(),
       email: `${overrides.username}@example.com`,
       passwordHash: "hash",
+      bio: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       ...overrides,

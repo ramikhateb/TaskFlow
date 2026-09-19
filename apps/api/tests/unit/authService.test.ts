@@ -31,6 +31,7 @@ describe("authService.register", () => {
       email: "a@example.com",
       name: "Alice",
       username: "alice",
+      bio: null,
     });
     expect(result.accessToken).toEqual(expect.any(String));
     expect(result.refreshToken).toEqual(expect.any(String));
@@ -210,5 +211,52 @@ describe("authService.logout", () => {
 
     await service.logout(refreshToken);
     await expect(service.logout(refreshToken)).resolves.toBeUndefined();
+  });
+});
+
+describe("authService.updateProfile", () => {
+  it("updates only the fields provided, leaving the rest untouched", async () => {
+    const { service } = buildService();
+    const { user } = await service.register({
+      email: "a@example.com",
+      password: "password1",
+      name: "Alice",
+      username: "alice",
+    });
+
+    const updated = await service.updateProfile(user.id, { bio: "Building things" });
+
+    expect(updated.name).toBe("Alice");
+    expect(updated.username).toBe("alice");
+    expect(updated.bio).toBe("Building things");
+  });
+
+  it("clears the bio when explicitly set to null", async () => {
+    const { service } = buildService();
+    const { user } = await service.register({
+      email: "a@example.com",
+      password: "password1",
+      name: "Alice",
+      username: "alice",
+    });
+    await service.updateProfile(user.id, { bio: "Temporary" });
+
+    const cleared = await service.updateProfile(user.id, { bio: null });
+
+    expect(cleared.bio).toBeNull();
+  });
+
+  it("never returns the password hash", async () => {
+    const { service } = buildService();
+    const { user } = await service.register({
+      email: "a@example.com",
+      password: "password1",
+      name: "Alice",
+      username: "alice",
+    });
+
+    const updated = await service.updateProfile(user.id, { name: "Alice B" });
+
+    expect(updated).not.toHaveProperty("passwordHash");
   });
 });

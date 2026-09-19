@@ -13,6 +13,17 @@ export function findById(id: string): Promise<User | null> {
   return prisma.user.findUnique({ where: { id } });
 }
 
+// PATCH-style: only the fields actually present in `data` are written — an
+// omitted field must leave the stored value untouched, which is why this
+// takes `Partial<...>` and spreads it directly into Prisma's `data` rather
+// than requiring every caller to pass every column.
+export function updateProfile(
+  id: string,
+  data: Partial<{ name: string; bio: string | null }>,
+): Promise<User> {
+  return prisma.user.update({ where: { id }, data });
+}
+
 export function create(data: {
   email: string;
   passwordHash: string;

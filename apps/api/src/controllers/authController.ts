@@ -4,6 +4,7 @@ import type {
   LogoutRequest,
   RefreshRequest,
   RegisterRequest,
+  UpdateProfileRequest,
 } from "@taskflow/shared";
 import type { AuthService } from "../services/authService";
 import { UnauthenticatedError } from "../errors";
@@ -42,5 +43,13 @@ export function createAuthController(authService: AuthService) {
     res.status(200).json(profile);
   });
 
-  return { register, login, refresh, logout, me };
+  const updateMe = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.user) {
+      throw new UnauthenticatedError("Missing authenticated user");
+    }
+    const profile = await authService.updateProfile(req.user.id, req.body as UpdateProfileRequest);
+    res.status(200).json(profile);
+  });
+
+  return { register, login, refresh, logout, me, updateMe };
 }

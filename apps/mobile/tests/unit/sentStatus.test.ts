@@ -1,4 +1,5 @@
-import { SENT_STATUS_COLORS, sentStatusLabel } from "../../src/features/inbox/sentStatus";
+import { sentStatusLabel } from "../../src/features/inbox/sentStatus";
+import { statusColors } from "../../src/ui/theme";
 
 describe("sentStatusLabel", () => {
   it.each([
@@ -11,14 +12,14 @@ describe("sentStatusLabel", () => {
   });
 });
 
-describe("SENT_STATUS_COLORS", () => {
-  it("defines a distinct color for every status", () => {
-    const colors = Object.values(SENT_STATUS_COLORS);
-    expect(new Set(colors).size).toBe(colors.length);
+describe("statusColors", () => {
+  it("defines a distinct foreground color for every status", () => {
+    const foregrounds = Object.values(statusColors).map((c) => c.fg);
+    expect(new Set(foregrounds).size).toBe(foregrounds.length);
   });
 
   it("has an entry for every AssignmentStatus value", () => {
-    expect(Object.keys(SENT_STATUS_COLORS).sort()).toEqual(
+    expect(Object.keys(statusColors).sort()).toEqual(
       ["ACCEPTED", "CANCELLED", "DECLINED", "PENDING"].sort(),
     );
   });

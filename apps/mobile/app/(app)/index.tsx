@@ -1,5 +1,5 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,9 +13,12 @@ import {
 import { useDebouncedValue } from "../../src/lib/useDebouncedValue";
 import { hasActiveTaskFilters, useTaskFilterStore } from "../../src/stores/taskFilterStore";
 import { TaskFilterModal } from "../../src/features/tasks/TaskFilterModal";
-import { TaskRow } from "../../src/features/tasks/TaskRow";
+import { TaskCard } from "../../src/features/tasks/TaskCard";
 import { useTasks } from "../../src/features/tasks/useTasks";
-import { colors, fontSize, radius, spacing } from "../../src/ui/theme";
+import { EmptyState } from "../../src/ui/EmptyState";
+import { IconButton } from "../../src/ui/IconButton";
+import { Screen } from "../../src/ui/Screen";
+import { colors, fontFamily, fontSize, radius, spacing } from "../../src/ui/theme";
 
 const SEARCH_DEBOUNCE_MS = 400;
 
@@ -27,6 +30,9 @@ export default function TaskListScreen() {
   const priority = useTaskFilterStore((s) => s.priority);
   const category = useTaskFilterStore((s) => s.category);
   const activeQuery = useTaskFilterStore((s) => s.q);
+  const setStatus = useTaskFilterStore((s) => s.setStatus);
+  const setPriority = useTaskFilterStore((s) => s.setPriority);
+  const setCategory = useTaskFilterStore((s) => s.setCategory);
   const setQuery = useTaskFilterStore((s) => s.setQuery);
   const clearAll = useTaskFilterStore((s) => s.clearAll);
 
@@ -42,6 +48,16 @@ export default function TaskListScreen() {
   }, [debouncedQuery, setQuery]);
 
   const filtersActive = hasActiveTaskFilters({ status, priority, category, q: activeQuery });
+  const activeFilterChips = [
+    status && {
+      key: "status",
+      label: status.replace("_", " ").toLowerCase(),
+      clear: () => setStatus(null),
+    },
+    priority && { key: "priority", label: priority.toLowerCase(), clear: () => setPriority(null) },
+    category && { key: "category", label: category, clear: () => setCategory(null) },
+  ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
+
   const tasks = useTasks({
     status: status ?? undefined,
     priority: priority ?? undefined,
@@ -55,46 +71,61 @@ export default function TaskListScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Tasks</Text>
-
-      <View style={styles.searchRow}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search tasks..."
-          placeholderTextColor={colors.textMuted}
-          accessibilityLabel="Search tasks"
-          returnKeyType="search"
-          value={searchDraft}
-          onChangeText={setSearchDraft}
-        />
-        <TouchableOpacity
-          style={[styles.filterButton, filtersActive && styles.filterButtonActive]}
-          accessibilityRole="button"
-          accessibilityLabel={filtersActive ? "Filters (active)" : "Filters"}
-          onPress={() => setFilterModalVisible(true)}
-        >
-          <Text style={[styles.filterButtonText, filtersActive && styles.filterButtonTextActive]}>
-            Filters{filtersActive ? " •" : ""}
-          </Text>
-        </TouchableOpacity>
+    <Screen>
+      <View style={styles.header}>
+        <Text style={styles.title}>Tasks</Text>
       </View>
 
-      {filtersActive && (
-        <TouchableOpacity accessibilityRole="button" onPress={clearEverything}>
-          <Text style={styles.clearAllLink}>Clear all filters</Text>
-        </TouchableOpacity>
+      <View style={styles.toolbar}>
+        <View style={styles.searchRow}>
+          <Ionicons name="search" size={17} color={colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search tasks"
+            placeholderTextColor={colors.textMuted}
+            accessibilityLabel="Search tasks"
+            returnKeyType="search"
+            value={searchDraft}
+            onChangeText={setSearchDraft}
+          />
+        </View>
+        <IconButton
+          name="options-outline"
+          variant={filtersActive ? "primary" : "default"}
+          accessibilityLabel={filtersActive ? "Filters (active)" : "Filters"}
+          onPress={() => setFilterModalVisible(true)}
+        />
+      </View>
+
+      {activeFilterChips.length > 0 && (
+        <FlatList
+          horizontal
+          data={activeFilterChips}
+          keyExtractor={(chip) => chip.key}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+          renderItem={({ item }) => (
+            <View style={styles.activeChip}>
+              <Text style={styles.activeChipText}>{item.label}</Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${item.label} filter`}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                onPress={item.clear}
+              >
+                <Ionicons name="close" size={13} color={colors.primaryPressed} />
+              </TouchableOpacity>
+            </View>
+          )}
+          ListFooterComponent={
+            <Text style={styles.clearAllLink} onPress={clearEverything}>
+              Clear all
+            </Text>
+          }
+        />
       )}
 
-      <TouchableOpacity
-        style={styles.newButton}
-        accessibilityRole="button"
-        onPress={() => router.push("/tasks/new")}
-      >
-        <Text style={styles.newButtonText}>+ New Task</Text>
-      </TouchableOpacity>
-
-      {tasks.isLoading && <ActivityIndicator style={styles.spacer} />}
+      {tasks.isLoading && <ActivityIndicator style={styles.spacer} color={colors.primary} />}
 
       {tasks.isError && (
         <Text style={styles.error}>
@@ -104,77 +135,100 @@ export default function TaskListScreen() {
       )}
 
       {tasks.data && tasks.data.length === 0 && filtersActive && (
-        <View style={styles.emptyBlock}>
-          <Text style={styles.emptyInBlock}>No tasks match your search or filters.</Text>
-          <TouchableOpacity accessibilityRole="button" onPress={clearEverything}>
-            <Text style={styles.clearAllLink}>Clear filters</Text>
-          </TouchableOpacity>
-        </View>
+        <EmptyState
+          icon="search-outline"
+          title="No matching tasks"
+          subtitle="Try changing your search or filters."
+        />
       )}
 
       {tasks.data && tasks.data.length === 0 && !filtersActive && (
-        <Text style={styles.empty}>No tasks yet — create your first one above.</Text>
+        <EmptyState
+          icon="checkbox-outline"
+          title="No tasks yet"
+          subtitle="Create your first task to get started."
+        />
       )}
 
       {tasks.data && tasks.data.length > 0 && (
         <FlatList
           data={tasks.data}
           keyExtractor={(task) => task.id}
-          renderItem={({ item }) => <TaskRow task={item} />}
-          style={styles.list}
+          renderItem={({ item }) => <TaskCard task={item} />}
+          contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         />
       )}
 
       <TaskFilterModal visible={filterModalVisible} onClose={() => setFilterModalVisible(false)} />
 
-      <StatusBar style="auto" />
-    </View>
+      <IconButton
+        name="add"
+        variant="floating"
+        accessibilityLabel="Create task"
+        style={styles.fab}
+        onPress={() => router.push("/tasks/new")}
+      />
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, padding: spacing.xl },
-  title: { fontSize: fontSize.xxl, fontWeight: "700", color: colors.textPrimary },
-  searchRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
-  searchInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    fontSize: fontSize.base,
+  header: { paddingHorizontal: spacing.xl, paddingTop: spacing.xl },
+  title: {
+    fontSize: fontSize.screenTitle,
+    fontFamily: fontFamily.heading,
     color: colors.textPrimary,
   },
-  filterButton: {
+  toolbar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    marginTop: spacing.lg,
+  },
+  searchRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
-    justifyContent: "center",
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
   },
-  filterButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  filterButtonText: { color: colors.textBody, fontWeight: "600", fontSize: fontSize.body },
-  filterButtonTextActive: { color: colors.textOnPrimary },
+  searchInput: { flex: 1, fontSize: fontSize.body, color: colors.textPrimary },
+  chipRow: {
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    alignItems: "center",
+  },
+  activeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    backgroundColor: colors.primaryLight,
+    borderRadius: radius.pill,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+  },
+  activeChipText: { fontSize: fontSize.small, color: colors.primaryPressed, fontWeight: "600" },
   clearAllLink: {
     color: colors.danger,
     fontWeight: "600",
-    marginTop: spacing.sm,
-    fontSize: fontSize.body,
+    fontSize: fontSize.small,
+    marginLeft: spacing.xs,
   },
-  newButton: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    alignItems: "center",
-    marginTop: spacing.lg,
-  },
-  newButtonText: { color: colors.textOnPrimary, fontWeight: "600", fontSize: fontSize.base },
   spacer: { marginTop: spacing.xl },
-  emptyBlock: { marginTop: spacing.xl, alignItems: "center", gap: spacing.sm },
-  emptyInBlock: { color: colors.textMuted, textAlign: "center" },
-  empty: { marginTop: spacing.xl, color: colors.textMuted, textAlign: "center" },
-  error: { marginTop: spacing.xl, color: colors.danger, textAlign: "center" },
-  list: { marginTop: spacing.lg },
+  error: {
+    marginTop: spacing.xl,
+    marginHorizontal: spacing.xl,
+    color: colors.danger,
+    textAlign: "center",
+  },
+  list: { padding: spacing.xl, gap: spacing.sm, paddingBottom: spacing.xxl * 2 },
+  fab: { position: "absolute", right: spacing.xl, bottom: spacing.xl },
 });

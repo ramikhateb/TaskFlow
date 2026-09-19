@@ -27,10 +27,18 @@ export function createFakeRepositories() {
         passwordHash: data.passwordHash,
         name: data.name,
         username: data.username,
+        bio: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
       users.push(user);
+      return user;
+    },
+    async updateProfile(id, data) {
+      const user = users.find((u) => u.id === id);
+      if (!user) throw new Error("not found");
+      if (data.name !== undefined) user.name = data.name;
+      if (data.bio !== undefined) user.bio = data.bio;
       return user;
     },
   };

@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LoginRequest, RegisterRequest } from "@taskflow/shared";
-import { loginRequest, logoutRequest, meRequest, registerRequest } from "../../api/auth";
+import type { LoginRequest, RegisterRequest, UpdateProfileRequest } from "@taskflow/shared";
+import {
+  loginRequest,
+  logoutRequest,
+  meRequest,
+  registerRequest,
+  updateProfileRequest,
+} from "../../api/auth";
 import {
   clearStoredRefreshToken,
   getStoredRefreshToken,
@@ -54,6 +60,17 @@ export function useLogin() {
       await setStoredRefreshToken(data.refreshToken);
       setAccessToken(data.accessToken);
       queryClient.setQueryData(ME_QUERY_KEY, data.user);
+    },
+  });
+}
+
+export function useUpdateProfile() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateProfileRequest) => updateProfileRequest(input),
+    onSuccess: (data) => {
+      queryClient.setQueryData(ME_QUERY_KEY, data);
     },
   });
 }

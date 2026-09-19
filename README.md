@@ -1,6 +1,8 @@
-# TaskFlow
+# Nudge
 
-A personal task manager with one thing most to-do apps don't have: **assignment with consent**. You can hand a task to someone else, but it only lands on their schedule if they explicitly accept it — nothing is ever imposed on a recipient's calendar.
+Turn intentions into progress. Nudge is a personal task manager with one thing most to-do apps don't have: **assignment with consent**. You can hand a task to someone else, but it only lands on their schedule if they explicitly accept it — nothing is ever imposed on a recipient's calendar.
+
+_Internally the codebase, database, and npm packages still use the working name "taskflow" (e.g. `@taskflow/api`, the `taskflow` database) — only the user-facing product name changed to Nudge. See [docs/RELEASE.md](docs/RELEASE.md) for why those weren't renamed too._
 
 See [docs/PRODUCT.md](docs/PRODUCT.md) for the full product vision and v1 scope.
 

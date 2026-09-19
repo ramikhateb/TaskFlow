@@ -19,8 +19,29 @@ export const userProfileSchema = z.object({
   email: z.string().email(),
   name: z.string(),
   username: z.string(),
+  bio: z.string().nullable(),
 });
 export type UserProfile = z.infer<typeof userProfileSchema>;
+
+export const BIO_MAX_LENGTH = 160;
+
+// PATCH-style: omitted fields are left untouched; bio may be explicitly set
+// to null to clear it. At least one field must be present, same convention
+// as updateTaskRequestSchema (packages/shared/src/schemas/task.ts).
+export const updateProfileRequestSchema = z
+  .object({
+    name: z.string().trim().min(1, "Name is required").max(100),
+    bio: z
+      .string()
+      .trim()
+      .max(BIO_MAX_LENGTH, `Bio must be at most ${BIO_MAX_LENGTH} characters`)
+      .nullable(),
+  })
+  .partial()
+  .refine((data) => Object.keys(data).length > 0, {
+    message: "At least one field must be provided",
+  });
+export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;
 
 export const registerRequestSchema = z.object({
   email: z.string().email(),

@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import type { PublicUser } from "@taskflow/shared";
 import {
@@ -10,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import { Avatar } from "../../ui/Avatar";
 import { colors, fontSize, radius, spacing } from "../../ui/theme";
 import { isSearchQueryTooShort, normalizeSearchQuery } from "./normalizeSearchQuery";
 import { useUserSearch } from "./useUserSearch";
@@ -39,17 +41,20 @@ export function UserSearchField({ onSelectUser, selectedUserId }: UserSearchFiel
 
   return (
     <View style={styles.container}>
-      <TextInput
-        style={styles.input}
-        placeholder="Search by name or @username"
-        placeholderTextColor={colors.textMuted}
-        accessibilityLabel="Search users"
-        autoCapitalize="none"
-        autoCorrect={false}
-        returnKeyType="search"
-        value={queryDraft}
-        onChangeText={setQueryDraft}
-      />
+      <View style={styles.inputRow}>
+        <Ionicons name="search" size={17} color={colors.textMuted} />
+        <TextInput
+          style={styles.input}
+          placeholder="Search by name or @username"
+          placeholderTextColor={colors.textMuted}
+          accessibilityLabel="Search users"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          value={queryDraft}
+          onChangeText={setQueryDraft}
+        />
+      </View>
 
       {isEmptyInput && <Text style={styles.hint}>Type a name or username to find someone.</Text>}
       {tooShort && <Text style={styles.hint}>Keep typing — at least 2 characters.</Text>}
@@ -80,8 +85,12 @@ export function UserSearchField({ onSelectUser, selectedUserId }: UserSearchFiel
                 accessibilityState={{ selected }}
                 onPress={() => onSelectUser?.(item)}
               >
-                <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.username}>@{item.username}</Text>
+                <Avatar name={item.name} size={36} />
+                <View style={styles.identity}>
+                  <Text style={styles.name}>{item.name}</Text>
+                  <Text style={styles.username}>@{item.username}</Text>
+                </View>
+                {selected && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
               </TouchableOpacity>
             );
           }}
@@ -93,28 +102,32 @@ export function UserSearchField({ onSelectUser, selectedUserId }: UserSearchFiel
 
 const styles = StyleSheet.create({
   container: { gap: spacing.sm },
-  input: {
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
+    borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    fontSize: fontSize.base,
-    color: colors.textPrimary,
+    backgroundColor: colors.surface,
   },
-  hint: { color: colors.textMuted, marginTop: spacing.sm },
-  error: { color: colors.danger, marginTop: spacing.sm },
+  input: { flex: 1, fontSize: fontSize.body, color: colors.textPrimary },
+  hint: { color: colors.textMuted, marginTop: spacing.sm, fontSize: fontSize.meta },
+  error: { color: colors.danger, marginTop: spacing.sm, fontSize: fontSize.meta },
   spacer: { marginTop: spacing.lg },
   list: { marginTop: spacing.sm },
   row: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: spacing.md,
+    gap: spacing.md,
+    paddingVertical: spacing.sm + 2,
     borderBottomWidth: 1,
-    borderBottomColor: colors.separator,
+    borderBottomColor: colors.border,
   },
-  rowSelected: { backgroundColor: colors.primaryMuted },
-  name: { fontSize: fontSize.md, fontWeight: "600", color: colors.textPrimary },
-  username: { fontSize: fontSize.md - 2, color: colors.textMuted },
+  rowSelected: { backgroundColor: colors.primaryLight, borderRadius: radius.md },
+  identity: { flex: 1 },
+  name: { fontSize: fontSize.body, fontWeight: "600", color: colors.textPrimary },
+  username: { fontSize: fontSize.meta, color: colors.textMuted },
 });

@@ -29,6 +29,11 @@ model User {
   // this plain @unique constraint IS the case-insensitive uniqueness
   // enforcement; no citext/collation trick needed.
   username     String   @unique
+  // Optional self-description shown on the user's own profile — nullable
+  // (never shown at all when unset, never a fake ""), capped at 160 chars,
+  // enforced again by Zod at the API boundary since Postgres's own length
+  // check only rejects, it doesn't produce a friendly validation message.
+  bio          String?  @db.VarChar(160)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

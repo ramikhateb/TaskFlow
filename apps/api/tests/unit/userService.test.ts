@@ -17,6 +17,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     passwordHash: "hash",
     name: `User ${userCounter}`,
     username: `user${userCounter}`,
+    bio: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
