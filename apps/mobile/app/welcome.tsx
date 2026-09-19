@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   spacer: { flex: 1, minHeight: spacing.lg },
-  illustration: { width: "100%", height: 230 },
+  illustration: { width: "100%", height: 260 },
   actions: { gap: spacing.md },
   button: { borderRadius: radius.pill, paddingVertical: 16 },
   footer: {
