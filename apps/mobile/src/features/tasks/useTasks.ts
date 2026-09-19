@@ -3,6 +3,7 @@ import type {
   CreateTaskRequest,
   DateRangeQuery,
   ListTasksQuery,
+  TaskDetailResponse,
   TaskResponse,
   UpdateTaskRequest,
 } from "@taskflow/shared";
@@ -85,7 +86,16 @@ export function useUpdateTask(id: string) {
   return useMutation({
     mutationFn: (input: UpdateTaskRequest) => updateTaskRequest(id, input),
     onSuccess: (data: TaskResponse) => {
-      queryClient.setQueryData(taskQueryKey(id), data);
+      // PATCH /tasks/:id returns a plain TaskResponse — unlike GET, it never
+      // carries viewer/assignee/creator/pendingAssignment (those are detail-
+      // only fields, see TaskDetailResponse). Merge onto whatever detail is
+      // already cached instead of replacing it outright, or Task Details
+      // would immediately crash reading `viewer` off the now-missing field.
+      // The invalidate right after still refetches the real detail in the
+      // background to reconcile anything this merge can't account for.
+      queryClient.setQueryData<TaskDetailResponse>(taskQueryKey(id), (old) =>
+        old ? { ...old, ...data } : old,
+      );
       queryClient.invalidateQueries({ queryKey: TASKS_QUERY_KEY });
     },
   });
