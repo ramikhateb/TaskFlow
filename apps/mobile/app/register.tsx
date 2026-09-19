@@ -1,11 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError } from "../src/api/client";
 import { useRegister } from "../src/features/auth/useAuth";
 import { Button } from "../src/ui/Button";
 import { TextField } from "../src/ui/FormField";
+import { IconButton } from "../src/ui/IconButton";
 import { colors, fontFamily, fontSize, radius, spacing } from "../src/ui/theme";
 
 interface StructuredErrorDetails {
@@ -40,6 +42,8 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function RegisterScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -59,6 +63,13 @@ export default function RegisterScreen() {
       style={styles.flex}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <IconButton
+        name="chevron-back"
+        accessibilityLabel="Back to welcome"
+        onPress={() => router.back()}
+        style={[styles.backButton, { top: insets.top + spacing.sm }]}
+      />
+
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
@@ -150,6 +161,7 @@ export default function RegisterScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
+  backButton: { position: "absolute", left: spacing.lg, zIndex: 1 },
   container: { flexGrow: 1, justifyContent: "center", padding: spacing.xl, gap: spacing.xl },
   brand: { alignItems: "center", gap: spacing.xs },
   brandMark: {
