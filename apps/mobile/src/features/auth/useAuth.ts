@@ -7,6 +7,7 @@ import {
   registerRequest,
   updateProfileRequest,
 } from "../../api/auth";
+import { logError } from "../../lib/devLog";
 import {
   clearStoredRefreshToken,
   getStoredRefreshToken,
@@ -45,6 +46,9 @@ export function useRegister() {
       setAccessToken(data.accessToken);
       queryClient.setQueryData(ME_QUERY_KEY, data.user);
     },
+    onError: (error) => {
+      logError("auth", "register failed", error);
+    },
   });
 }
 
@@ -60,6 +64,9 @@ export function useLogin() {
       await setStoredRefreshToken(data.refreshToken);
       setAccessToken(data.accessToken);
       queryClient.setQueryData(ME_QUERY_KEY, data.user);
+    },
+    onError: (error) => {
+      logError("auth", "login failed", error);
     },
   });
 }

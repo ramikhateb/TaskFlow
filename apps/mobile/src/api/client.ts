@@ -1,4 +1,5 @@
 import type { AuthResponse } from "@taskflow/shared";
+import { logError } from "../lib/devLog";
 import {
   clearStoredRefreshToken,
   getStoredRefreshToken,
@@ -7,6 +8,11 @@ import {
 import { getAccessToken, useSessionStore } from "../stores/sessionStore";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
+
+// Boot line so Metro proves this bundle is loaded (errors-only after that).
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  console.log(`[api] ready → ${API_URL}`);
+}
 
 export class ApiError extends Error {
   constructor(
@@ -45,11 +51,19 @@ async function performRefresh(): Promise<string | null> {
     return null;
   }
 
-  const response = await fetch(`${API_URL}/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refreshToken: storedRefreshToken }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: storedRefreshToken }),
+    });
+  } catch (error) {
+    logError("api", `POST /auth/refresh failed — cannot reach ${API_URL}`, error);
+    await clearStoredRefreshToken();
+    useSessionStore.getState().setAccessToken(null);
+    return null;
+  }
 
   if (!response.ok) {
     // Refresh failed (expired, revoked, or reused) — the session is over.
@@ -84,6 +98,9 @@ async function performFetch<T>(
   auth: boolean,
   isRetry: boolean,
 ): Promise<T> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const label = `${method} ${path}${isRetry ? " (retry)" : ""}`;
+
   const authHeaders: Record<string, string> = {};
   if (auth) {
     const token = getAccessToken();
@@ -92,10 +109,16 @@ async function performFetch<T>(
     }
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...authHeaders, ...init.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...authHeaders, ...init.headers },
+    });
+  } catch (error) {
+    logError("api", `${label} network error — cannot reach ${API_URL}`, error);
+    throw error;
+  }
 
   if (response.status === 401 && auth && !isRetry) {
     const newToken = await refreshSession();
@@ -111,13 +134,19 @@ async function performFetch<T>(
     // "email taken" from "username taken" — both 409s — without parsing text.
     const body = await response.json().catch(() => null);
     const serverError = body?.error as
-      { code?: string; message?: string; details?: unknown } | undefined;
-    throw new ApiError(
+      | { code?: string; message?: string; details?: unknown }
+      | undefined;
+    const apiError = new ApiError(
       serverError?.message ?? `Request to ${path} failed with status ${response.status}`,
       response.status,
       serverError?.code,
       serverError?.details,
     );
+    logError(
+      "api",
+      `${label} → ${response.status}${apiError.code ? ` [${apiError.code}]` : ""}: ${apiError.message}`,
+    );
+    throw apiError;
   }
 
   if (response.status === 204) {

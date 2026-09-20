@@ -5,6 +5,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError } from "../src/api/client";
 import { useLogin } from "../src/features/auth/useAuth";
+import { logError } from "../src/lib/devLog";
 import { Button } from "../src/ui/Button";
 import { TextField } from "../src/ui/FormField";
 import { IconButton } from "../src/ui/IconButton";
@@ -24,6 +25,18 @@ export default function SignInScreen() {
     : null;
 
   const canSubmit = email.trim().length > 0 && password.length > 0 && !login.isPending;
+
+  function submit() {
+    if (!canSubmit) return;
+    login.mutate(
+      { email, password },
+      {
+        onError: (error) => {
+          logError("sign-in", `failed for ${email.trim()}`, error);
+        },
+      },
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -71,7 +84,7 @@ export default function SignInScreen() {
             returnKeyType="go"
             value={password}
             onChangeText={setPassword}
-            onSubmitEditing={() => canSubmit && login.mutate({ email, password })}
+            onSubmitEditing={submit}
           />
 
           {errorMessage && (
@@ -84,7 +97,7 @@ export default function SignInScreen() {
             label="Sign In"
             loading={login.isPending}
             disabled={!canSubmit}
-            onPress={() => login.mutate({ email, password })}
+            onPress={submit}
             style={styles.submit}
           />
         </View>
